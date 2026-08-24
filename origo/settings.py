@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-h($p9)mrt^)&@r(3$6%ek5^pp11-3!)_(!36llfkk4g+=5%h_#
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*.origo.test', 'localhost','api.origo.test']
 
 
 # Application definition
@@ -39,10 +39,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'django_filters',
     'corsheaders',
     'accounts',
     'flux',
-    'oikos',
+    'verso',
 ]
 
 MIDDLEWARE = [
@@ -146,11 +147,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+    ],
 }
 
 
 # Cross-subdomain session cookie
-# The Next.js frontends for Flux and Oikos live on separate subdomains of a
+# The Next.js frontends for Flux and Verso live on separate subdomains of a
 # shared root domain and need to share the Django session cookie. Real
 # production domains are TBD; ROOT_DOMAIN defaults to a local-dev placeholder.
 # Override via the ROOT_DOMAIN env var once real domains are chosen.
@@ -168,11 +172,11 @@ CSRF_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
 
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
-    f'https://flux.{ROOT_DOMAIN},https://oikos.{ROOT_DOMAIN}',
+    f'https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     'CSRF_TRUSTED_ORIGINS',
-    f'https://flux.{ROOT_DOMAIN},https://oikos.{ROOT_DOMAIN}',
+    f'https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
 ).split(',')

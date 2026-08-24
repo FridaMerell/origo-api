@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class OikosConfig(AppConfig):
+class VersoConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'oikos'
+    name = 'verso'
