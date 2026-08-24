@@ -21,12 +21,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-h($p9)mrt^)&@r(3$6%ek5^pp11-3!)_(!36llfkk4g+=5%h_#'
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-h($p9)mrt^)&@r(3$6%ek5^pp11-3!)_(!36llfkk4g+=5%h_#',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*.origo.test', 'localhost','api.origo.test']
+ALLOWED_HOSTS = ['*.origo.test', 'localhost','api.origo.test', 'verso.xn--fvitsko-exa.se']
 
 
 # Application definition
