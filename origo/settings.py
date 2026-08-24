@@ -29,7 +29,10 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*.origo.test', 'localhost','api.origo.test', 'verso.xn--fvitsko-exa.se']
+ALLOWED_HOSTS = os.environ.get(
+    'ALLOWED_HOSTS',
+    '*.origo.test,localhost,api.origo.test,verso.xn--fvitsko-exa.se',
+).split(',')
 
 
 # Application definition
