@@ -52,6 +52,8 @@ INSTALLED_APPS = [
     'verso',
 ]
 
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
@@ -195,5 +197,5 @@ CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     'CSRF_TRUSTED_ORIGINS',
-    f'https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
+    f'https://origo.api.{ROOT_DOMAIN},https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
 ).split(',')
