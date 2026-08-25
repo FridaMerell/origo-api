@@ -9,6 +9,7 @@ from verso.views import (
     HouseViewSet,
     VentureTaskViewSet,
     VentureViewSet,
+    UpdateViewSet,
 )
 
 app_name = 'verso'
@@ -21,6 +22,7 @@ router.register('check-outs', CheckOutViewSet, basename='checkout')
 router.register('ventures', VentureViewSet, basename='venture')
 router.register('venture-tasks', VentureTaskViewSet, basename='venturetask')
 router.register('expenses', ExpenseViewSet, basename='expense')
+router.register('updates', UpdateViewSet, basename='update')
 
 urlpatterns = [
     path('', include(router.urls)),

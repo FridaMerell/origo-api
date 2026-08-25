@@ -1,5 +1,10 @@
 from django.contrib import admin
-from verso.models import House, Booking, BookingRequest, CheckOut, Venture, VentureTask, Expense
+from verso.models import House, Booking, BookingRequest, CheckOut, Venture, VentureTask, Expense, VersoUpdate
+
+@admin.register(VersoUpdate)
+class VersoUpdateAdmin(admin.ModelAdmin):
+    list_display = ('venture', 'task', 'author', 'title', 'created_at', 'updated_at')
+
 # Register your models here.
 @admin.register(House)
 class HouseAdmin(admin.ModelAdmin):

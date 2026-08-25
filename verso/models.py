@@ -5,6 +5,8 @@ from django.db import models
 class House(models.Model):
     name = models.CharField(max_length=255)
     address = models.CharField(max_length=255, blank=True)
+    lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="houses")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -83,9 +85,16 @@ class Venture(models.Model):
     def __str__(self):
         return self.name
 
-class Update(models.Model):
+class VersoUpdate(models.Model):
     venture = models.ForeignKey(
-        Venture, on_delete=models.CASCADE, related_name="updates"
+        Venture, on_delete=models.CASCADE, related_name="updates", null=True, blank=True
+    )
+    task = models.ForeignKey(
+        "VentureTask", on_delete=models.CASCADE, related_name="updates", null=True, blank=True
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="verso_updates",
     )
     title = models.CharField(max_length=255)
     content = models.TextField()
@@ -95,7 +104,7 @@ class Update(models.Model):
         blank=True, default=list
     )  # Store file metadata as a list of dictionaries
     def __str__(self):
-        return f"Update: {self.title} for Venture: {self.venture.name}"
+        return f"Update: {self.title} for Venture: {self.venture.name if self.venture else 'N/A'} and Task: {self.task.name if self.task else 'N/A'}"
 
 
 class VentureTask(models.Model):

@@ -1,3 +1,5 @@
+import django_filters
+from django.utils import timezone
 from rest_framework import permissions, viewsets
 
 from verso.models import (
@@ -5,9 +7,11 @@ from verso.models import (
     BookingRequest,
     CheckOut,
     Expense,
+    VersoUpdate,
     House,
     Venture,
     VentureTask,
+    
 )
 from verso.serializers import (
     BookingRequestSerializer,
@@ -17,6 +21,7 @@ from verso.serializers import (
     HouseSerializer,
     VentureSerializer,
     VentureTaskSerializer,
+    VersoUpdateSerializer,
 )
 
 
@@ -33,13 +38,27 @@ class HouseViewSet(viewsets.ModelViewSet):
         house.members.add(self.request.user)
 
 
+class BookingFilter(django_filters.FilterSet):
+    future = django_filters.BooleanFilter(method='filter_future')
+
+    class Meta:
+        model = Booking
+        fields = ['house', 'future']
+
+    def filter_future(self, queryset, name, value):
+        today = timezone.localdate()
+        if value:
+            return queryset.filter(start_date__gte=today)
+        return queryset.filter(start_date__lt=today)
+
+
 class BookingViewSet(viewsets.ModelViewSet):
     serializer_class = BookingSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['house']
+    filterset_class = BookingFilter
 
     def get_queryset(self):
-        return Booking.objects.filter(house__members=self.request.user).distinct()
+        return Booking.objects.filter(house__members=self.request.user).distinct().order_by('start_date')
 
 
 class BookingRequestViewSet(viewsets.ModelViewSet):
@@ -85,3 +104,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Expense.objects.all()
+
+class UpdateViewSet(viewsets.ModelViewSet):
+    serializer_class = VersoUpdateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['venture', 'task', 'author']
+
+    def get_queryset(self):
+        return VersoUpdate.objects.all()

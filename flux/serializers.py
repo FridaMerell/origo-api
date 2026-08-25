@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from flux.models import Project, Task
+from flux.models import Milestone, Project, Task, Update
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -17,12 +17,35 @@ class ProjectSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+class MilestoneSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Milestone
+        fields = [
+            'id',
+            'project',
+            'title',
+            'description',
+            'status',
+            'target_date',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate_project(self, project):
+        request = self.context['request']
+        if not project.members.filter(pk=request.user.pk).exists():
+            raise serializers.ValidationError("You must be a member of this project.")
+        return project
+
+
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = [
             'id',
             'project',
+            'milestone',
             'parent',
             'subtasks',
             'requirements',
@@ -77,6 +100,12 @@ class TaskSerializer(serializers.ModelSerializer):
                 {'parent': "Parent task must belong to the same project."}
             )
 
+        milestone = attrs.get('milestone', getattr(self.instance, 'milestone', None))
+        if milestone is not None and milestone.project_id != project.pk:
+            raise serializers.ValidationError(
+                {'milestone': "Milestone must belong to the same project."}
+            )
+
         requirements = attrs.get('requirements')
         if requirements is not None:
             mismatched = [r for r in requirements if r.project_id != project.pk]
@@ -92,6 +121,45 @@ class TaskSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'assignees': "Assignees must be members of the project."}
                 )
+
+        return attrs
+
+
+class UpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Update
+        fields = [
+            'id',
+            'project',
+            'milestone',
+            'task',
+            'author',
+            'content',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['author', 'created_at', 'updated_at']
+
+    def validate_project(self, project):
+        request = self.context['request']
+        if not project.members.filter(pk=request.user.pk).exists():
+            raise serializers.ValidationError("You must be a member of this project.")
+        return project
+
+    def validate(self, attrs):
+        project = attrs.get('project') or getattr(self.instance, 'project', None)
+
+        milestone = attrs.get('milestone', getattr(self.instance, 'milestone', None))
+        if milestone is not None and milestone.project_id != project.pk:
+            raise serializers.ValidationError(
+                {'milestone': "Milestone must belong to the same project."}
+            )
+
+        task = attrs.get('task', getattr(self.instance, 'task', None))
+        if task is not None and task.project_id != project.pk:
+            raise serializers.ValidationError(
+                {'task': "Task must belong to the same project."}
+            )
 
         return attrs
 

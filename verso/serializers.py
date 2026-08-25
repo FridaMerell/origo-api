@@ -8,6 +8,7 @@ from verso.models import (
     House,
     Venture,
     VentureTask,
+    VersoUpdate,
 )
 
 
@@ -21,6 +22,8 @@ class HouseSerializer(serializers.ModelSerializer):
             "members",
             "created_at",
             "updated_at",
+            "lat",
+            "lng",
         ]
         read_only_fields = ["created_at", "updated_at"]
 
@@ -156,5 +159,24 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "house",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+
+class VersoUpdateSerializer(serializers.ModelSerializer):
+    by=author = serializers.StringRelatedField(source="author.username", read_only=True)
+    class Meta:
+        model = VersoUpdate
+        fields = [
+            "id",
+            "venture",
+            "task",
+            "by",
+            "author",
+            "title",
+            "content",
+            "created_at",
+            "updated_at",
+            "files",
         ]
         read_only_fields = ["created_at", "updated_at"]
