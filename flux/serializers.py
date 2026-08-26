@@ -13,6 +13,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             'members',
             'created_at',
             'updated_at',
+            'files',
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -29,6 +30,7 @@ class MilestoneSerializer(serializers.ModelSerializer):
             'target_date',
             'created_at',
             'updated_at',
+            'files',
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -55,8 +57,10 @@ class TaskSerializer(serializers.ModelSerializer):
             'description',
             'due_date',
             'priority',
+            'status',
             'created_at',
             'updated_at',
+            'files',
         ]
         read_only_fields = ['subtasks', 'required_by', 'created_at', 'updated_at']
 
@@ -137,6 +141,7 @@ class UpdateSerializer(serializers.ModelSerializer):
             'content',
             'created_at',
             'updated_at',
+            'files'
         ]
         read_only_fields = ['author', 'created_at', 'updated_at']
 

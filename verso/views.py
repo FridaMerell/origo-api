@@ -1,7 +1,9 @@
 import django_filters
 from django.utils import timezone
 from rest_framework import permissions, viewsets
-
+from rest_framework.decorators import action
+from rest_framework.response import Response
+import django.db.models as models
 from verso.models import (
     Booking,
     BookingRequest,
@@ -11,7 +13,7 @@ from verso.models import (
     House,
     Venture,
     VentureTask,
-    
+
 )
 from verso.serializers import (
     BookingRequestSerializer,
@@ -103,7 +105,24 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     filterset_fields = ['venture', 'house']
 
     def get_queryset(self):
-        return Expense.objects.all()
+        return Expense.objects.all().order_by('-date_incurred')
+
+    @action(detail=False, methods=['get'])
+    def year_expenses(self, request):
+        house_id = request.query_params.get('house_id')
+        if not house_id:
+            return Response({'error': 'house_id query parameter is required.'}, status=400)
+        year = timezone.now().year
+        if 'year' in request.query_params:
+            try:
+                year = int(request.query_params['year'])
+            except ValueError:
+                return Response({'error': 'Invalid year parameter.'}, status=400)
+        current_year = year
+        expenses = Expense.objects.filter(date_incurred__year=current_year, house_id=house_id)
+        total_expenses = expenses.aggregate(total=models.Sum('amount'))['total'] or 0
+        return Response({'year': current_year, 'total_expenses': total_expenses})
+
 
 class UpdateViewSet(viewsets.ModelViewSet):
     serializer_class = VersoUpdateSerializer
@@ -111,4 +130,8 @@ class UpdateViewSet(viewsets.ModelViewSet):
     filterset_fields = ['venture', 'task', 'author']
 
     def get_queryset(self):
-        return VersoUpdate.objects.all()
+        return VersoUpdate.objects.all().order_by('-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
+

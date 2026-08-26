@@ -164,7 +164,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
 
 class VersoUpdateSerializer(serializers.ModelSerializer):
-    by=author = serializers.StringRelatedField(source="author.username", read_only=True)
+    by = serializers.StringRelatedField(source="author.username", read_only=True)
+    author = serializers.PrimaryKeyRelatedField(read_only=True)
     class Meta:
         model = VersoUpdate
         fields = [
@@ -178,5 +179,7 @@ class VersoUpdateSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "files",
+            "house"
         ]
         read_only_fields = ["created_at", "updated_at"]
+

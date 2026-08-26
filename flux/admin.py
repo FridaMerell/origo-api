@@ -17,8 +17,8 @@ class MilestoneAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ['title', 'project', 'milestone', 'parent', 'priority', 'due_date', 'created_at', 'updated_at']
-    list_filter = ['project', 'priority']
+    list_display = ['title', 'project', 'milestone', 'parent', 'priority', 'status', 'due_date', 'created_at', 'updated_at']
+    list_filter = ['project', 'priority', 'status']
     filter_horizontal = ['requirements', 'assignees']
 
 

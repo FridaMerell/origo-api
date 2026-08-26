@@ -8,6 +8,7 @@ class Project(models.Model):
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='projects')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    files = models.JSONField(blank=True, default=list)  # Store file metadata as a list of dictionaries
 
     def __str__(self):
         return self.name
@@ -28,6 +29,7 @@ class Milestone(models.Model):
     target_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    files = models.JSONField(blank=True, default=list)  # Store file metadata as a list of dictionaries
 
     def __str__(self):
         return self.title
@@ -38,6 +40,11 @@ class Task(models.Model):
         LOW = 'low', 'Low'
         MEDIUM = 'medium', 'Medium'
         HIGH = 'high', 'High'
+
+    class Status(models.TextChoices):
+        NOT_STARTED = 'not_started', 'Not started'
+        IN_PROGRESS = 'in_progress', 'In progress'
+        DONE = 'done', 'Done'
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='tasks')
     milestone = models.ForeignKey(
@@ -53,8 +60,12 @@ class Task(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     due_date = models.DateField(null=True, blank=True)
+    files = models.JSONField(blank=True, default=list)  # Store file metadata as a list of dictionaries
     priority = models.CharField(
         max_length=10, choices=Priority.choices, default=Priority.MEDIUM,
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.NOT_STARTED,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -76,6 +87,7 @@ class Update(models.Model):
         related_name='updates',
     )
     content = models.TextField()
+    files = models.JSONField(blank=True, default=list)  # Store file metadata as a list of dictionaries
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

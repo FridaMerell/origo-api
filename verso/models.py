@@ -92,6 +92,9 @@ class VersoUpdate(models.Model):
     task = models.ForeignKey(
         "VentureTask", on_delete=models.CASCADE, related_name="updates", null=True, blank=True
     )
+    house = models.ForeignKey(
+        House, on_delete=models.CASCADE, related_name="updates", null=True, blank=True
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="verso_updates",
@@ -141,3 +144,4 @@ class Expense(models.Model):
 
     def __str__(self):
         return f'Expense of {self.amount} for Venture: {self.venture.name if self.venture else "N/A"}'
+
