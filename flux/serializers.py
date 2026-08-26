@@ -19,6 +19,7 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class MilestoneSerializer(serializers.ModelSerializer):
+    update_count = serializers.IntegerField(source='updates.count', read_only=True)
     class Meta:
         model = Milestone
         fields = [
@@ -31,6 +32,7 @@ class MilestoneSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'files',
+            'update_count'
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -42,6 +44,7 @@ class MilestoneSerializer(serializers.ModelSerializer):
 
 
 class TaskSerializer(serializers.ModelSerializer):
+    update_count = serializers.IntegerField(source='updates.count', read_only=True)
     class Meta:
         model = Task
         fields = [
@@ -61,6 +64,7 @@ class TaskSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'files',
+            'update_count'
         ]
         read_only_fields = ['subtasks', 'required_by', 'created_at', 'updated_at']
 
@@ -130,6 +134,7 @@ class TaskSerializer(serializers.ModelSerializer):
 
 
 class UpdateSerializer(serializers.ModelSerializer):
+    
     class Meta:
         model = Update
         fields = [
