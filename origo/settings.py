@@ -31,7 +31,7 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.environ.get(
     'ALLOWED_HOSTS',
-    '*.origo.test,localhost,api.origo.test,verso.xn--fvitsko-exa.se',
+    '*.origo.test,verso.origo.test,flux.origo.test,localhost,api.origo.test,verso.xn--fvitsko-exa.se,flux.xn--fvitsko-exa.se,origo.api.xn--fvitsko-exa.se',
 ).split(',')
 
 
@@ -194,8 +194,9 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
     f'https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
-
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     'CSRF_TRUSTED_ORIGINS',
-    f'https://origo.api.{ROOT_DOMAIN},https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
+    f'https://origo.api.{ROOT_DOMAIN},'
+    f'http://flux.{ROOT_DOMAIN}:3000,https://flux.{ROOT_DOMAIN}:3000,'
+    f'http://verso.{ROOT_DOMAIN}:3000,https://verso.{ROOT_DOMAIN}:3000',
 ).split(',')

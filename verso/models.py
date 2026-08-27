@@ -141,6 +141,10 @@ class Expense(models.Model):
     house = models.ForeignKey(
         House, on_delete=models.CASCADE, related_name="expenses", null=True, blank=True
     )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="expenses",
+    )
 
     def __str__(self):
         return f'Expense of {self.amount} for Venture: {self.venture.name if self.venture else "N/A"}'
