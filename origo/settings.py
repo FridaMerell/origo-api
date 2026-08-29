@@ -11,10 +11,22 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import re
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load a local .env file (repo root) into os.environ if present. Real values
+# in the environment always take precedence, so deployed environments that set
+# variables directly are unaffected. See .env.example for the supported keys.
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    pass
+else:
+    load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -29,10 +41,65 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.environ.get(
-    'ALLOWED_HOSTS',
-    '*.origo.test,verso.origo.test,flux.origo.test,localhost,api.origo.test,verso.xn--fvitsko-exa.se,flux.xn--fvitsko-exa.se,origo.api.xn--fvitsko-exa.se',
-).split(',')
+# ---------------------------------------------------------------------------
+# Domains
+# ---------------------------------------------------------------------------
+# The whole host/CORS/CSRF configuration below is derived from this single
+# list. To bring a new domain online, just add it to the DOMAINS env var
+# (comma-separated) - nothing else in this file needs to change:
+#
+#     DOMAINS=origo.test,xn--fvitsko-exa.se,example.com
+#
+# Each domain is expected to serve:
+#   - the API at   <API_SUBDOMAIN>.<domain>
+#   - a frontend at <sub>.<domain>   for every sub in FRONTEND_SUBDOMAINS
+#
+# Punycode (xn--...) domains work here as-is; use the encoded form.
+
+DOMAINS = [
+    d.strip()
+    for d in os.environ.get('DOMAINS', 'origo.test').split(',')
+    if d.strip()
+]
+
+FRONTEND_SUBDOMAINS = [
+    s.strip()
+    for s in os.environ.get('FRONTEND_SUBDOMAINS', 'flux,verso,apsis').split(',')
+    if s.strip()
+]
+
+API_SUBDOMAIN = os.environ.get('API_SUBDOMAIN', 'origo.api')
+
+# Ports the Next.js frontends run on in local development (for CSRF only).
+FRONTEND_DEV_PORTS = [
+    p.strip()
+    for p in os.environ.get('FRONTEND_DEV_PORTS', '3000').split(',')
+    if p.strip()
+]
+
+
+def _frontend_origins(schemes=('https',), ports=(None,)):
+    """Build <scheme>://<sub>.<domain>[:port] for every frontend subdomain."""
+    origins = []
+    for domain in DOMAINS:
+        for sub in FRONTEND_SUBDOMAINS:
+            for scheme in schemes:
+                for port in ports:
+                    host = f'{sub}.{domain}'
+                    origins.append(
+                        f'{scheme}://{host}:{port}' if port else f'{scheme}://{host}'
+                    )
+    return origins
+
+
+# An explicit ALLOWED_HOSTS env var still wins; otherwise allow every domain
+# and all of its subdomains.
+if os.environ.get('ALLOWED_HOSTS'):
+    ALLOWED_HOSTS = [h.strip() for h in os.environ['ALLOWED_HOSTS'].split(',') if h.strip()]
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+    for domain in DOMAINS:
+        ALLOWED_HOSTS += [domain, f'.{domain}']
 
 
 # Application definition
@@ -45,11 +112,16 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework.authtoken',
     'django_filters',
+    'django_tasks',
+    'django_tasks_db',
     'corsheaders',
     'accounts',
     'flux',
     'verso',
+    'apsis',
+    'tempus'
 ]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -90,17 +162,43 @@ WSGI_APPLICATION = 'origo.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
-# DATABASE_URL unset -> local SQLite. Set it (e.g. to a Neon connection
-# string) in production to use Postgres instead.
+# DATABASE_URL unset -> local SQLite. A PostgreSQL URL is parsed with the
+# standard library so database configuration has no third-party dependency.
 
-import dj_database_url
+database_url = os.environ.get('DATABASE_URL')
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
-        conn_max_age=600,
-    )
-}
+if database_url:
+    parsed_database_url = urlparse(database_url)
+    if parsed_database_url.scheme not in ('postgres', 'postgresql'):
+        raise ValueError('DATABASE_URL must use the postgres or postgresql scheme.')
+
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': unquote(parsed_database_url.path.lstrip('/')),
+            'USER': unquote(parsed_database_url.username or ''),
+            'PASSWORD': unquote(parsed_database_url.password or ''),
+            'HOST': parsed_database_url.hostname or '',
+            'PORT': parsed_database_url.port or '',
+            # The threaded Django development server creates a new request
+            # thread frequently; retaining a connection for ten minutes per
+            # thread can exhaust a small remote PostgreSQL instance even for
+            # one user. Keep local connections request-scoped, while allowing
+            # production to opt into a bounded lifetime.
+            'CONN_MAX_AGE': int(
+                os.environ.get('DB_CONN_MAX_AGE', '0' if DEBUG else '60')
+            ),
+            'CONN_HEALTH_CHECKS': True,
+            'OPTIONS': dict(parse_qsl(parsed_database_url.query)),
+        }
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -172,13 +270,31 @@ REST_FRAMEWORK = {
 }
 
 
-# Cross-subdomain session cookie
-# The Next.js frontends for Flux and Verso live on separate subdomains of a
-# shared root domain and need to share the Django session cookie. Real
-# production domains are TBD; ROOT_DOMAIN defaults to a local-dev placeholder.
-# Override via the ROOT_DOMAIN env var once real domains are chosen.
+# Background tasks (django-tasks / DEP 0014)
+# Phenogram generation runs off the request cycle. The database backend
+# (django-tasks-db) needs a worker process: `python manage.py db_worker`. Set
+# TASKS_BACKEND to `django_tasks.backends.immediate.ImmediateBackend` to run
+# tasks inline (dev, or a deploy with no worker); tests force the immediate
+# backend.
 
-ROOT_DOMAIN = os.environ.get('ROOT_DOMAIN', 'origo.test')
+TASKS = {
+    'default': {
+        'BACKEND': os.environ.get(
+            'TASKS_BACKEND',
+            'django_tasks_db.DatabaseBackend',
+        ),
+    }
+}
+
+
+# Cross-subdomain session cookie
+# The Next.js frontends live on separate subdomains of a shared root domain
+# and need to share the Django session cookie. A cookie can only be scoped to
+# one root domain, so the session/CSRF cookies use ROOT_DOMAIN, which defaults
+# to the first entry in DOMAINS. Override via the ROOT_DOMAIN env var if the
+# primary domain is not listed first.
+
+ROOT_DOMAIN = os.environ.get('ROOT_DOMAIN', DOMAINS[0])
 
 SESSION_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
 CSRF_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
@@ -187,16 +303,85 @@ CSRF_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
 # CORS
 # https://github.com/adamchainz/django-cors-headers
 # Allows the separately-hosted Next.js frontends to call this API with
-# credentials (the session cookie) attached.
+# credentials (the session cookie) attached. Derived from DOMAINS; set the
+# CORS_ALLOWED_ORIGINS env var to override completely.
 
-CORS_ALLOWED_ORIGINS = os.environ.get(
-    'CORS_ALLOWED_ORIGINS',
-    f'https://flux.{ROOT_DOMAIN},https://verso.{ROOT_DOMAIN}',
-).split(',')
+if os.environ.get('CORS_ALLOWED_ORIGINS'):
+    CORS_ALLOWED_ORIGINS = [
+        o.strip() for o in os.environ['CORS_ALLOWED_ORIGINS'].split(',') if o.strip()
+    ]
+else:
+    CORS_ALLOWED_ORIGINS = _frontend_origins(schemes=('https',))
+
+    # Frontends are separated by subdomain. Trust any frontend subdomain below
+    # a configured root domain so a new app does not also require a settings
+    # change. DNS for these domains must therefore remain under our control.
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        rf'^https://[a-z0-9-]+\.{re.escape(domain)}$'
+        for domain in DOMAINS
+    ] + [
+        rf'^https?://[a-z0-9-]+\.{re.escape(domain)}:{re.escape(port)}$'
+        for domain in DOMAINS
+        for port in FRONTEND_DEV_PORTS
+    ]
+
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = os.environ.get(
-    'CSRF_TRUSTED_ORIGINS',
-    f'https://origo.api.{ROOT_DOMAIN},'
-    f'http://flux.{ROOT_DOMAIN}:3000,https://flux.{ROOT_DOMAIN}:3000,'
-    f'http://verso.{ROOT_DOMAIN}:3000,https://verso.{ROOT_DOMAIN}:3000',
-).split(',')
+
+if os.environ.get('CSRF_TRUSTED_ORIGINS'):
+    CSRF_TRUSTED_ORIGINS = [
+        o.strip() for o in os.environ['CSRF_TRUSTED_ORIGINS'].split(',') if o.strip()
+    ]
+else:
+    CSRF_TRUSTED_ORIGINS = (
+        [f'https://{API_SUBDOMAIN}.{domain}' for domain in DOMAINS]
+        + [f'https://*.{domain}' for domain in DOMAINS]
+        + [
+            f'{scheme}://*.{domain}:{port}'
+            for domain in DOMAINS
+            for scheme in ('http', 'https')
+            for port in FRONTEND_DEV_PORTS
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# SLU Artdatabanken APIs (used by the tempus app)
+# ---------------------------------------------------------------------------
+# Species observations, Dyntaxa taxonomy and Artfakta species information, all
+# behind one API gateway at api.artdatabanken.se. Each product has its own
+# subscription key, issued on the developer portal (api-portal.artdatabanken.se).
+# Calls are no-ops until the relevant *_KEY variable is set; see
+# tempus/services/artdatabanken.py and .claude/skills/artdatabanken-api/.
+
+ARTDATABANKEN = {
+    'SPECIES_OBSERVATION_URL': os.environ.get(
+        'ARTDATABANKEN_SPECIES_OBSERVATION_URL',
+        'https://api.artdatabanken.se/species-observation-system/v1',
+    ),
+    'TAXON_SERVICE_URL': os.environ.get(
+        'ARTDATABANKEN_TAXON_SERVICE_URL',
+        'https://api.artdatabanken.se/taxonservice/v1',
+    ),
+    'SPECIES_INFORMATION_URL': os.environ.get(
+        'ARTDATABANKEN_SPECIES_INFORMATION_URL',
+        'https://api.artdatabanken.se/information/v1',
+    ),
+    'SUBSCRIPTION_KEY_SOS': os.environ.get('ARTDATABANKEN_SUBSCRIPTION_KEY_SOS'),
+    'SUBSCRIPTION_KEY_TAXON': os.environ.get('ARTDATABANKEN_SUBSCRIPTION_KEY_TAXON'),
+    'SUBSCRIPTION_KEY_SPECIES_INFORMATION': os.environ.get(
+        'ARTDATABANKEN_SUBSCRIPTION_KEY_SPECIES_INFORMATION'
+    ),
+    'TIMEOUT': float(os.environ.get('ARTDATABANKEN_TIMEOUT', '30')),
+    'USER_AGENT': os.environ.get(
+        'ARTDATABANKEN_USER_AGENT', 'Tempus (+tempus.services.artdatabanken)'
+    ),
+    # Artfakta SpeciesDataService dataset path segments. The biotoper segment is
+    # unverified; override if biotopes come back empty (see BIOTOPES_DATASET in
+    # tempus/services/artdatabanken.py).
+    'SPECIESDATA_LANDSCAPES_PATH': os.environ.get(
+        'ARTDATABANKEN_SPECIESDATA_LANDSCAPES_PATH', 'landscapetypes'
+    ),
+    'SPECIESDATA_BIOTOPES_PATH': os.environ.get(
+        'ARTDATABANKEN_SPECIESDATA_BIOTOPES_PATH', 'biotopes'
+    ),
+}

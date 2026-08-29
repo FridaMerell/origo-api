@@ -2,6 +2,9 @@ Django>=6.1,<7.0
 djangorestframework
 django-cors-headers
 django-filter
-dj-database-url
+django-tasks>=0.12
+django-tasks-db
 psycopg[binary]
 whitenoise
+python-dotenv
+requests
