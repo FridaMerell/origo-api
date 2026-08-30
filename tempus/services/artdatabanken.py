@@ -20,6 +20,11 @@ should be confirmed against that document.
 
 import datetime
 import logging
+import os
+import tempfile
+import time
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator, NotRequired, TypedDict
 
 from django.conf import settings
@@ -104,6 +109,107 @@ def _session():
     return session
 
 
+def _process_is_running(pid: int) -> bool:
+    """Whether ``pid`` still identifies a process, without signalling it."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(
+            process_query_limited_information,
+            False,
+            pid,
+        )
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return ctypes.get_last_error() == 5  # access denied means it exists
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _lock_owner(lock_path: Path) -> int | None:
+    try:
+        return int(lock_path.read_text(encoding="ascii").strip())
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+
+
+@contextmanager
+def _global_request_slot():
+    """Serialize API calls and enforce a minimum interval between starts.
+
+    The atomic lock file coordinates every Tempus process on the same machine,
+    so web requests and one or more task workers share a single limit across
+    Dyntaxa, Artfakta and SOS. A crashed process' stale lock is recoverable.
+    """
+    config = _config()
+    cooldown = max(0.0, float(config.get("COOLDOWN_SECONDS", 0)))
+    if cooldown == 0:
+        yield
+        return
+
+    state_path = Path(
+        config.get("COOLDOWN_STATE_FILE")
+        or Path(tempfile.gettempdir()) / "tempus-artdatabanken-api.cooldown"
+    )
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = state_path.with_name(f"{state_path.name}.lock")
+    stale_after = max(
+        30.0,
+        float(config.get("TIMEOUT", 30)) * 3 + cooldown + 30.0,
+    )
+
+    lock_fd = None
+    while lock_fd is None:
+        try:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(lock_fd, str(os.getpid()).encode("ascii"))
+        except FileExistsError:
+            try:
+                too_old = time.time() - lock_path.stat().st_mtime > stale_after
+            except FileNotFoundError:
+                continue
+            owner_pid = _lock_owner(lock_path)
+            owner_is_dead = (
+                owner_pid is not None and not _process_is_running(owner_pid)
+            )
+            if owner_is_dead or too_old:
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+            time.sleep(min(0.1, max(0.01, cooldown / 10)))
+
+    try:
+        try:
+            last_started = float(state_path.read_text(encoding="ascii").strip())
+        except (FileNotFoundError, ValueError):
+            last_started = 0.0
+        wait = last_started + cooldown - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        state_path.write_text(str(time.time()), encoding="ascii")
+        yield
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _call(
     method: str,
     base_url_key: str,
@@ -112,17 +218,34 @@ def _call(
     *,
     params: dict | None = None,
     json: Any = None,
+    timeout: float | None = None,
 ) -> Any:
     base_url, key = _require(base_url_key, subscription_key)
     url = f"{base_url}/{path.lstrip('/')}"
-    response = _session().request(
-        method,
-        url,
-        params=params,
-        json=json,
-        headers={"Ocp-Apim-Subscription-Key": key},
-        timeout=_config().get("TIMEOUT", 30),
+    request_timeout = float(
+        _config().get("TIMEOUT", 30) if timeout is None else timeout
     )
+    with _global_request_slot():
+        started = time.monotonic()
+        try:
+            response = _session().request(
+                method,
+                url,
+                params=params,
+                json=json,
+                headers={"Ocp-Apim-Subscription-Key": key},
+                timeout=request_timeout,
+            )
+        finally:
+            elapsed = time.monotonic() - started
+            slow_request_seconds = max(30.0, request_timeout * 5)
+            if elapsed > slow_request_seconds:
+                logger.warning(
+                    "Slow Artdatabanken request: %s %s took %.1fs",
+                    method,
+                    url,
+                    elapsed,
+                )
     if not response.ok:
         raise ArtdatabankenAPIError(method, url, response.status_code, response.text)
     if response.status_code == 204 or not response.content:
@@ -352,6 +475,32 @@ def search_taxa(
     return list(results.values())
 
 
+def get_taxa(taxon_ids) -> list[TaxonData]:
+    """Fetch and normalize several Dyntaxa taxa in one ``POST /taxa`` call.
+
+    Unknown ids are simply absent from the result. ``api_data`` on each row
+    keeps the raw payload (``redlistCategory`` etc.).
+    """
+    ids = [int(t) for t in taxon_ids if int(t) > 0]
+    if not ids:
+        return []
+    payload = _call(
+        "POST", "TAXON_SERVICE_URL", "SUBSCRIPTION_KEY_TAXON", "/taxa",
+        params={"culture": "sv_SE"},
+        json={"taxonIds": ids},
+    )
+    hits = payload if isinstance(payload, list) else (
+        payload.get("data") or payload.get("records") or payload.get("taxa") or []
+    )
+    out: list[TaxonData] = []
+    for hit in hits:
+        try:
+            out.append(_normalize_taxon(hit))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def get_taxon(taxon_id: int) -> TaxonData:
     """Fetch and normalize one Dyntaxa taxon.
 
@@ -359,19 +508,12 @@ def get_taxon(taxon_id: int) -> TaxonData:
     """
     if taxon_id <= 0:
         raise ValueError("taxon_id must be a positive integer")
-    payload = _call(
-        "POST", "TAXON_SERVICE_URL", "SUBSCRIPTION_KEY_TAXON", "/taxa",
-        params={"culture": "sv_SE"},
-        json={"taxonIds": [taxon_id]},
-    )
-    hits = payload if isinstance(payload, list) else (
-        payload.get("data") or payload.get("records") or payload.get("taxa") or []
-    )
+    hits = get_taxa([taxon_id])
     if not hits:
         raise ArtdatabankenAPIError(
             "POST", "/taxa", 404, f"Dyntaxa taxon {taxon_id} not found"
         )
-    return _normalize_taxon(hits[0])
+    return hits[0]
 
 
 def get_species_information(taxon_id: int) -> dict[str, Any]:
@@ -613,6 +755,7 @@ def resync_species_batch(species_iter) -> Iterator[tuple[int, Species | None, "A
 def search_observations(
     search_filter: dict, *, skip: int = 0, take: int = 100,
     sort_by: str | None = None, sort_order: str = "Asc",
+    timeout: float | None = None,
 ) -> dict:
     """POST /Observations/Search. Returns ``{"totalCount": int, "records": [...]}``."""
     if take > SOS_MAX_TAKE:
@@ -628,6 +771,7 @@ def search_observations(
     return _call(
         "POST", "SPECIES_OBSERVATION_URL", "SUBSCRIPTION_KEY_SOS",
         "/Observations/Search", params=params, json=search_filter,
+        timeout=timeout,
     )
 
 
@@ -651,25 +795,44 @@ def taxon_aggregation(search_filter: dict, *, skip: int = 0, take: int = 100) ->
     )
 
 
-def geo_grid_aggregation(search_filter: dict, *, zoom: int = 10) -> dict:
+def geo_grid_aggregation(
+    search_filter: dict, *, zoom: int = 10, timeout: float | None = None
+) -> dict:
     """POST /Observations/GeoGridAggregation - bucket matching observations into
     a spatial grid. ``zoom`` sets the cell size (higher = finer). Returns
     ``{"gridCells": [{"boundingBox"|"bbox", "observationsCount", ...}]}`` (exact
     keys vary by API version; confirm against the SOS OpenAPI document).
+
+    An area-wide grid can be slow, so ``timeout`` is accepted (a wide grid over
+    a whole province wants the longer ``PHENOGRAM_TIMEOUT``).
     """
     return _call(
         "POST", "SPECIES_OBSERVATION_URL", "SUBSCRIPTION_KEY_SOS",
         "/Observations/GeoGridAggregation", params={"zoom": zoom},
-        json=search_filter,
+        json=search_filter, timeout=timeout,
     )
 
 
-def iter_observations(search_filter: dict, *, page_size: int = SOS_MAX_TAKE) -> Iterator[dict]:
+def iter_observations(
+    search_filter: dict,
+    *,
+    page_size: int = SOS_MAX_TAKE,
+    timeout: float | None = None,
+) -> Iterator[dict]:
     """Yield observation records, paging within the 10 000-record search window."""
+    if timeout is None:
+        timeout = float(
+            _config().get("PHENOGRAM_TIMEOUT", _config().get("TIMEOUT", 30))
+        )
     skip = 0
     while skip < SOS_MAX_WINDOW:
         take = min(page_size, SOS_MAX_WINDOW - skip)
-        page = search_observations(search_filter, skip=skip, take=take)
+        page = search_observations(
+            search_filter,
+            skip=skip,
+            take=take,
+            timeout=timeout,
+        )
         records = page.get("records") or []
         yield from records
         skip += take

@@ -372,6 +372,19 @@ ARTDATABANKEN = {
         'ARTDATABANKEN_SUBSCRIPTION_KEY_SPECIES_INFORMATION'
     ),
     'TIMEOUT': float(os.environ.get('ARTDATABANKEN_TIMEOUT', '30')),
+    # SOS observation pages used to build phenograms are substantially larger
+    # than taxonomy metadata responses and need a separate socket timeout.
+    'PHENOGRAM_TIMEOUT': float(
+        os.environ.get('ARTDATABANKEN_PHENOGRAM_TIMEOUT', '60')
+    ),
+    # Minimum quiet period after any Artdatabanken response before another
+    # Dyntaxa, Artfakta or SOS request may start. Shared across local processes.
+    'COOLDOWN_SECONDS': float(
+        os.environ.get('ARTDATABANKEN_COOLDOWN_SECONDS', '1')
+    ),
+    'COOLDOWN_STATE_FILE': os.environ.get(
+        'ARTDATABANKEN_COOLDOWN_STATE_FILE'
+    ),
     'USER_AGENT': os.environ.get(
         'ARTDATABANKEN_USER_AGENT', 'Tempus (+tempus.services.artdatabanken)'
     ),

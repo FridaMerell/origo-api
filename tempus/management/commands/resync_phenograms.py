@@ -82,7 +82,9 @@ class Command(BaseCommand):
             return
 
         for species_pk in queryset.values_list("pk", flat=True):
-            tasks.fan_out_species_phenograms.enqueue(species_pk, refresh=refresh)
+            tasks.fan_out_species_phenograms.enqueue(
+                str(species_pk), refresh=refresh
+            )
 
         self.stdout.write(
             self.style.SUCCESS(

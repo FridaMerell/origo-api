@@ -1,14 +1,37 @@
-from django.db.models import Q
-from django_filters.rest_framework import DjangoFilterBackend, FilterSet, NumberFilter
+import json
+import logging
+import time
+import uuid
+from datetime import timedelta
+
+import psycopg
+from django.db import close_old_connections, connection
+from django.db.models import Exists, OuterRef, Q
+from django.http import StreamingHttpResponse
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from django_filters.rest_framework import (
+    BooleanFilter,
+    DjangoFilterBackend,
+    FilterSet,
+    NumberFilter,
+)
 from rest_framework import filters, permissions, status, viewsets
+from rest_framework.authentication import TokenAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.renderers import BaseRenderer
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from origo.pagination import StandardPagination
 from tempus import tasks
-from tempus.services import artdatabanken, phenogram, season
+from tempus.services import artdatabanken, phenogram, route_planner, season
 
 from tempus.models import (
+    BIRDNET_DETECTION_CHANNEL,
+    BirdnetDevice,
+    BirdnetDetection,
     Checklist,
     ChecklistItem,
     GeoArea,
@@ -17,30 +40,46 @@ from tempus.models import (
     Phenophase,
     Route,
     RouteStop,
+    RouteSuggestionRun,
     Source,
     Species,
     SpeciesCategory,
     SpeciesFollow,
 )
 from tempus.serializers import (
+    BirdnetDeviceSerializer,
     ChecklistItemSerializer,
     ChecklistSerializer,
     GeoAreaSerializer,
+    BirdnetDetectionSerializer,
     ObservationSerializer,
     PhenogramQuerySerializer,
     PhenogramSerializer,
     PhenophaseSerializer,
     RouteSerializer,
+    RouteSuggestionRunSerializer,
+    SuggestedStopsQuerySerializer,
     RegisterSpeciesSerializer,
+    SpeciesChecklistImportSerializer,
     GeneratePhenogramsSerializer,
     RouteStopSerializer,
     SourceSerializer,
     SpeciesResyncSerializer,
+    SeasonalOverviewQuerySerializer,
+    SeasonalOverviewSerializer,
     SpeciesCategorySerializer,
     SpeciesFollowSerializer,
     SpeciesSearchSerializer,
     SpeciesSerializer,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def _is_true(value):
+    """Truthiness for a query-string flag (``?sync=true``, ``?refresh=1``)."""
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class SharedDataPermission(permissions.BasePermission):
@@ -61,6 +100,7 @@ class SharedDataViewSet(viewsets.ModelViewSet):
 class SpeciesFilter(FilterSet):
     category = NumberFilter(field_name="categories__taxon_id")
     categories__taxon_id = NumberFilter(field_name="categories__taxon_id")
+    is_followed = BooleanFilter(field_name="is_followed")
 
     class Meta:
         model = Species
@@ -79,7 +119,50 @@ class SpeciesViewSet(SharedDataViewSet):
     filterset_class = SpeciesFilter
     search_fields = ["swedish_name", "scientific_name"]
     lookup_field = "dyntaxa_taxon_id"
+    pagination_class = StandardPagination
 
+    def get_queryset(self):
+        user = self.request.user
+        followed = SpeciesFollow.objects.filter(
+            species=OuterRef("pk"), user=user
+        )
+        return super().get_queryset().annotate(is_followed=Exists(followed))
+
+    @action(detail=False, methods=["get"], url_path="seasonal-overview")
+    def seasonal_overview(self, request):
+        """Paginated species currently entering or leaving season in an area.
+
+        The response is built exclusively from stored eight-year phenograms;
+        it never starts an Artdatabanken crawl in the request cycle.
+        """
+        params = SeasonalOverviewQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        opts = params.validated_data
+
+        followed = SpeciesFollow.objects.filter(
+            species_id=OuterRef("species_id"), user=request.user
+        )
+        queryset = (
+            Phenogram.objects.filter(
+                geo_area=opts["geo_area"],
+                years=phenogram.DEFAULT_YEARS,
+                record_count__gte=opts["min_records"],
+            )
+            .select_related("species")
+            .annotate(is_followed=Exists(followed))
+            .order_by("species__swedish_name", "species__scientific_name")
+        )
+
+        wanted = set(opts["status"])
+        matches = []
+        for row in queryset:
+            row._seasonal_status = season.status_for(row)
+            if any(season.matches_status(row, item) for item in wanted):
+                matches.append(row)
+
+        page = self.paginate_queryset(matches)
+        serializer = SeasonalOverviewSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
     @action(detail=False, methods=["post"])
     def register(self, request):
@@ -102,6 +185,35 @@ class SpeciesViewSet(SharedDataViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(
             self.get_serializer(species).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=False, methods=["post"], url_path="import-checklist")
+    def import_checklist(self, request):
+        """Validate a CSV checklist and queue every taxon for registration.
+
+        Multipart body: ``species_category`` (category UUID) and ``file``. The
+        CSV must be UTF-8 and contain a ``Taxon id`` column; semicolon-, comma-
+        and tab-delimited exports are accepted.
+        """
+        payload = SpeciesChecklistImportSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        category = payload.validated_data["species_category"]
+        taxon_ids = payload.validated_data["taxon_ids"]
+
+        tasks.import_species_checklist.enqueue(str(category.pk), taxon_ids)
+
+        return Response(
+            {
+                "detail": (
+                    "Species import queued. Phenograms will be scheduled after "
+                    "all taxa have been processed."
+                ),
+                "category": str(category.pk),
+                "queued": len(taxon_ids),
+                "batch_tasks": 1,
+                "duplicates_ignored": payload.validated_data["duplicate_count"],
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
 
     @action(detail=True, methods=["post"])
@@ -258,7 +370,7 @@ class SpeciesViewSet(SharedDataViewSet):
         else:
             selected = Species.objects.all()
 
-        pks = list(selected.values_list("pk", flat=True))
+        pks = [str(pk) for pk in selected.values_list("pk", flat=True)]
         for species_pk in pks:
             tasks.fan_out_species_phenograms.enqueue(species_pk, refresh=refresh)
         return Response(
@@ -353,6 +465,98 @@ class RouteViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    # A succeeded run with identical params younger than this is reused instead
+    # of recomputing (unless the caller passes ?refresh=true).
+    SUGGESTION_TTL = timedelta(hours=6)
+
+    @action(detail=True, methods=["get", "post"], url_path="suggested-stops")
+    def suggested_stops(self, request, pk=None):
+        """The route's rest-stop suggestions - species variety and rarity along
+        the corridor, never raw report volume (Artdatabanken observation API).
+
+        ``suggest_rest_stops`` makes dozens of rate-limited API calls, so it
+        runs in a background task:
+
+        * ``POST`` starts (or reuses) a computation and returns ``202`` with the
+          run ``status``. Params (all optional): ``taxon_id``, ``since_days``,
+          ``notable_days``, ``max_detour_m``, ``num_stops``, ``edge_buffer_m``
+          (skip stops near either end of the route), ``min_gap_m`` (minimum
+          spacing between stops). ``?refresh=true`` forces a recompute even if a
+          fresh result exists.
+        * ``GET`` returns the current run - poll it for ``status`` and, once
+          ``succeeded``, ``result``. ``404`` until the first ``POST``.
+          ``?sync=true`` computes inline and returns the stops directly, without
+          persisting - for debugging only; it can take minutes and may time out.
+        """
+        route = self.get_object()
+
+        if request.method == "GET" and _is_true(request.query_params.get("sync")):
+            return self._suggested_stops_sync(request, route)
+
+        run = RouteSuggestionRun.objects.filter(route=route).first()
+
+        if request.method == "GET":
+            if run is None:
+                return Response(
+                    {"detail": "No suggestion run for this route yet; POST to start one."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            return Response(RouteSuggestionRunSerializer(run).data)
+
+        # POST - start or reuse a run.
+        if not route.geometry:
+            raise ValidationError({"geometry": "This route has no geometry."})
+
+        params = SuggestedStopsQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        wanted = dict(params.validated_data)
+
+        fresh_cutoff = timezone.now() - self.SUGGESTION_TTL
+        if (
+            run is not None
+            and not _is_true(request.query_params.get("refresh"))
+            and run.status == RouteSuggestionRun.SUCCEEDED
+            and run.params == wanted
+            and run.finished_at is not None
+            and run.finished_at >= fresh_cutoff
+        ):
+            return Response(RouteSuggestionRunSerializer(run).data)
+
+        run, _ = RouteSuggestionRun.objects.update_or_create(
+            route=route,
+            defaults={
+                "params": wanted,
+                "status": RouteSuggestionRun.PENDING,
+                "result": [],
+                "error": "",
+                "started_at": None,
+                "finished_at": None,
+            },
+        )
+        tasks.compute_route_suggestions.enqueue(str(route.pk))
+        return Response(
+            RouteSuggestionRunSerializer(run).data, status=status.HTTP_202_ACCEPTED
+        )
+
+    def _suggested_stops_sync(self, request, route):
+        if not route.geometry:
+            raise ValidationError({"geometry": "This route has no geometry."})
+        params = SuggestedStopsQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        try:
+            stops = route_planner.suggest_rest_stops(
+                route.geometry, route.corridor_metres, **params.validated_data
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)})
+        except artdatabanken.ArtdatabankenConfigurationError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except artdatabanken.ArtdatabankenAPIError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"route": route.pk, "count": len(stops), "stops": stops})
+
 
 class RouteStopViewSet(viewsets.ModelViewSet):
     serializer_class = RouteStopSerializer
@@ -394,3 +598,272 @@ class ObservationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class BirdnetDetectionIngestView(APIView):
+    """Ingest endpoint for BirdNET field devices.
+
+    Devices authenticate with a DRF token (``Authorization: Token <key>``).
+    One detection per POST; responds 201 with the stored row.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = BirdnetDetectionSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+# --- BirdNET live stream -----------------------------------------------------
+
+BIRDNET_STREAM_HEARTBEAT_SECONDS = 15
+BIRDNET_STREAM_DEVICE_REFRESH_SECONDS = 60
+BIRDNET_STREAM_POLL_SECONDS = 1
+BIRDNET_STREAM_BATCH = 200
+# OPTIONS keys Django's PostgreSQL backend consumes itself - they are not
+# libpq keywords and psycopg.connect() would reject them.
+_NON_LIBPQ_OPTIONS = {
+    "pool",
+    "server_side_binding",
+    "isolation_level",
+    "assume_role",
+}
+
+
+class ServerSentEventRenderer(BaseRenderer):
+    """Lets DRF content negotiation accept ``Accept: text/event-stream``.
+
+    ``EventSource`` sends that Accept header; without a matching renderer the
+    request is rejected with 406 before the view runs. The view returns a raw
+    ``StreamingHttpResponse``, so ``render`` is never actually called.
+    """
+
+    media_type = "text/event-stream"
+    format = "event-stream"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        if data is None or isinstance(data, (bytes, str)):
+            return data
+        # Only reached for an error Response (e.g. 401/403) on this endpoint.
+        return json.dumps(data).encode()
+
+
+def _close_quietly(conn):
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+
+
+def _birdnet_listen_connection():
+    """A dedicated autocommit psycopg connection ``LISTEN``ing for detections.
+
+    Separate from the ORM connection: it blocks in ``LISTEN`` for the whole
+    lifetime of one SSE response and must never be shared. Built from the
+    default database's settings so it honours ``DATABASE_URL``.
+    """
+    db = connection.settings_dict
+    params = {
+        "dbname": db["NAME"] or None,
+        "user": db["USER"] or None,
+        "password": db["PASSWORD"] or None,
+        "host": db["HOST"] or None,
+        "port": db["PORT"] or None,
+    }
+    for key, value in (db.get("OPTIONS") or {}).items():
+        if key not in _NON_LIBPQ_OPTIONS and isinstance(value, (str, int)):
+            params[key] = value
+    conn = psycopg.connect(autocommit=True, **params)
+    try:
+        conn.execute(f"LISTEN {BIRDNET_DETECTION_CHANNEL}")
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
+def _birdnet_user_device_ids(user_id):
+    return {
+        str(pk)
+        for pk in BirdnetDevice.objects.filter(users=user_id).values_list(
+            "id", flat=True
+        )
+    }
+
+
+def _birdnet_notify_device_id(note):
+    try:
+        return json.loads(note.payload).get("device_id")
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _birdnet_new_events(user_id, cursor):
+    """SSE chunks for detections after ``cursor``; advances ``cursor`` in place."""
+    detections = list(
+        BirdnetDetection.objects.filter(device__users=user_id)
+        .filter(
+            Q(created_at__gt=cursor["time"])
+            | Q(created_at=cursor["time"], id__gt=cursor["id"])
+        )
+        .select_related("device", "species")
+        .order_by("created_at", "id")[:BIRDNET_STREAM_BATCH]
+    )
+    chunks = []
+    for detection in detections:
+        cursor["time"] = detection.created_at
+        cursor["id"] = detection.id
+        event_id = f"{detection.created_at.isoformat()}|{detection.id}"
+        data = json.dumps(BirdnetDetectionSerializer(detection).data)
+        chunks.append(f"id: {event_id}\nevent: detection\ndata: {data}\n\n")
+    return chunks
+
+
+class BirdnetDetectionStreamView(APIView):
+    """Stream detections for the authenticated user's devices over SSE.
+
+    On PostgreSQL the loop blocks on a ``LISTEN``/``NOTIFY`` signal (channel
+    ``birdnet_detection``, emitted by a ``post_save`` signal once the row
+    commits) and confirms every wake with a cursor query, so nothing is missed
+    or duplicated. It falls back to one-second polling when the backend is not
+    PostgreSQL, or when the listen connection cannot be opened or is lost
+    mid-stream.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    renderer_classes = [ServerSentEventRenderer]
+
+    def perform_content_negotiation(self, request, force=False):
+        # SSE only - never 406 on a mismatched or absent Accept header.
+        return ServerSentEventRenderer(), ServerSentEventRenderer.media_type
+
+    def get(self, request):
+        user_id = request.user.pk
+        cursor_time, cursor_id = self._initial_cursor(request)
+
+        def event_stream():
+            cursor = {"time": cursor_time, "id": cursor_id}
+            listen_conn = None
+            if connection.vendor == "postgresql":
+                try:
+                    listen_conn = _birdnet_listen_connection()
+                except Exception:  # noqa: BLE001 - degrade to polling
+                    logger.warning(
+                        "BirdNET SSE: LISTEN connection unavailable; polling",
+                        exc_info=True,
+                    )
+
+            device_ids = set()
+            device_ids_at = 0.0
+            last_heartbeat = time.monotonic()
+            try:
+                close_old_connections()
+                for chunk in _birdnet_new_events(user_id, cursor):
+                    yield chunk
+                last_heartbeat = time.monotonic()
+
+                while True:
+                    woke = False
+                    now = time.monotonic()
+
+                    if listen_conn is not None:
+                        if (
+                            now - device_ids_at
+                            >= BIRDNET_STREAM_DEVICE_REFRESH_SECONDS
+                        ):
+                            close_old_connections()
+                            device_ids = _birdnet_user_device_ids(user_id)
+                            device_ids_at = now
+                            woke = True
+                        try:
+                            for note in listen_conn.notifies(
+                                timeout=BIRDNET_STREAM_HEARTBEAT_SECONDS,
+                                stop_after=1,
+                            ):
+                                device_id = _birdnet_notify_device_id(note)
+                                if device_id is None or device_id in device_ids:
+                                    woke = True
+                        except Exception:  # noqa: BLE001 - degrade to polling
+                            logger.warning(
+                                "BirdNET SSE: LISTEN connection lost; polling",
+                                exc_info=True,
+                            )
+                            _close_quietly(listen_conn)
+                            listen_conn = None
+                            woke = True
+                    else:
+                        time.sleep(BIRDNET_STREAM_POLL_SECONDS)
+                        woke = True
+
+                    if woke:
+                        close_old_connections()
+                        chunks = _birdnet_new_events(user_id, cursor)
+                        for chunk in chunks:
+                            yield chunk
+                        if chunks:
+                            last_heartbeat = time.monotonic()
+
+                    if (
+                        time.monotonic() - last_heartbeat
+                        >= BIRDNET_STREAM_HEARTBEAT_SECONDS
+                    ):
+                        yield ": keep-alive\n\n"
+                        last_heartbeat = time.monotonic()
+            finally:
+                _close_quietly(listen_conn)
+                close_old_connections()
+
+        response = StreamingHttpResponse(
+            event_stream(),
+            content_type="text/event-stream",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+    @staticmethod
+    def _initial_cursor(request):
+        event_id = request.headers.get("Last-Event-ID", "")
+        if "|" in event_id:
+            raw_time, raw_id = event_id.rsplit("|", 1)
+            parsed_time = parse_datetime(raw_time)
+            try:
+                parsed_id = uuid.UUID(raw_id)
+            except ValueError:
+                parsed_id = None
+            if parsed_time is not None and parsed_id is not None:
+                return parsed_time, parsed_id
+
+        try:
+            replay_seconds = max(
+                0,
+                min(int(request.query_params.get("replay_seconds", 0)), 86_400),
+            )
+        except (TypeError, ValueError):
+            replay_seconds = 0
+        return timezone.now() - timedelta(seconds=replay_seconds), uuid.UUID(int=0)
+
+
+class BirdnetDeviceViewSet(viewsets.ModelViewSet):
+    serializer_class = BirdnetDeviceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            BirdnetDevice.objects.filter(users=self.request.user)
+            .select_related("house")
+            .prefetch_related("users")
+            .distinct()
+        )
+
+    def perform_create(self, serializer):
+        device = serializer.save()
+        device.users.add(self.request.user)

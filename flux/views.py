@@ -29,7 +29,15 @@ class MilestoneViewSet(viewsets.ModelViewSet):
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['project', 'milestone', 'parent', 'assignees', 'priority']
+    filterset_fields = [
+        'project',
+        'milestone',
+        'parent',
+        'assignees',
+        'priority',
+        'recurrence',
+        'recurrence_source',
+    ]
 
     def get_queryset(self):
         return Task.objects.filter(project__members=self.request.user).distinct()

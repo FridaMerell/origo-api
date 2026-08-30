@@ -1,5 +1,6 @@
 import datetime
 
+from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from tempus.models import GeoArea, Phenogram, Species
@@ -70,6 +71,14 @@ class _Session:
                 "totalCount": len(self._records),
                 "records": self._records[skip:skip + take],
             })
+        if url.endswith("/Observations/GeoGridAggregation"):
+            # species-filtered footprint is smaller than all-taxa effort
+            n = 3 if (json or {}).get("taxon") else 40
+            return _FakeResponse({"gridCells": [
+                {"boundingBox": [17.0 + i * 0.1, 59.0, 17.1 + i * 0.1, 59.1],
+                 "observationsCount": 5}
+                for i in range(n)
+            ]})
         raise AssertionError(f"unexpected URL {url}")
 
     def search_calls(self):
@@ -155,6 +164,8 @@ class BuildPhenogramTests(SimpleTestCase):
 @override_settings(ARTDATABANKEN=_SETTINGS)
 class GetPhenogramTests(TestCase):
     def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.species = Species.objects.create(
             dyntaxa_taxon_id=TAXON, scientific_name="Anthocharis cardamines"
         )
@@ -175,6 +186,10 @@ class GetPhenogramTests(TestCase):
         self.assertEqual(len(pg.weeks), 52)
         self.assertEqual(Phenogram.objects.count(), 1)
         self.assertEqual(pg.geo_area, self.area)
+        # significance filled from the occupied-cell share (3 of 40 cells)
+        self.assertIsNotNone(pg.significance)
+        self.assertEqual(pg.significance_basis["species_cells"], 3)
+        self.assertEqual(pg.significance_basis["area_cells"], 40)
 
     def test_second_call_reads_the_row_without_crawling(self):
         session = self._session()
@@ -198,3 +213,7 @@ class GetPhenogramTests(TestCase):
         pg = phenogram.get_phenogram(self.species, None, today=TODAY)
         self.assertIsNone(pg.geo_area_id)
         self.assertEqual(Phenogram.objects.filter(geo_area__isnull=True).count(), 1)
+        # the whole-range significance is also mirrored onto the Species
+        self.species.refresh_from_db()
+        self.assertEqual(self.species.significance, pg.significance)
+        self.assertIsNotNone(self.species.significance)

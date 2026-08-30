@@ -58,7 +58,42 @@ class SnapTests(SimpleTestCase):
         near = (mid[0] + 0.0001, mid[1])
         self.assertEqual(geo.snap_towards(near, LINE, max_offset_m=2_000), near)
 
+    def test_distance_along_line(self):
+        total = geo.line_length_m(LINE)
+        self.assertAlmostEqual(geo.distance_along_line(LINE, STOCKHOLM), 0.0, delta=1.0)
+        self.assertAlmostEqual(geo.distance_along_line(LINE, UPPSALA), total, delta=1.0)
+        quarter = geo.point_at_distance(LINE, total / 4)
+        # a point a little off the line still projects to ~the same arc position
+        off = (quarter[0] + 0.02, quarter[1])
+        self.assertAlmostEqual(geo.distance_along_line(LINE, off), total / 4, delta=total * 0.05)
+
 
 class BboxTests(SimpleTestCase):
     def test_centroid(self):
         self.assertEqual(geo.bbox_centroid([10.0, 50.0, 20.0, 60.0]), (15.0, 55.0))
+
+
+class PointInPolygonTests(SimpleTestCase):
+    # A square around Uppsala, with a hole cut out of the middle.
+    SQUARE = {
+        "type": "Polygon",
+        "coordinates": [
+            [[17.0, 59.0], [18.5, 59.0], [18.5, 60.0], [17.0, 60.0], [17.0, 59.0]],
+            [[17.6, 59.5], [17.7, 59.5], [17.7, 59.6], [17.6, 59.6], [17.6, 59.5]],
+        ],
+    }
+    MULTI = {"type": "MultiPolygon", "coordinates": [SQUARE["coordinates"]]}
+
+    def test_inside(self):
+        self.assertTrue(geo.point_in_multipolygon((17.3, 59.2), self.SQUARE))
+        self.assertTrue(geo.point_in_multipolygon((17.3, 59.2), self.MULTI))
+
+    def test_outside(self):
+        self.assertFalse(geo.point_in_multipolygon((10.0, 59.2), self.SQUARE))
+
+    def test_in_hole_counts_as_outside(self):
+        self.assertFalse(geo.point_in_multipolygon((17.65, 59.55), self.SQUARE))
+
+    def test_tolerates_empty_geometry(self):
+        self.assertFalse(geo.point_in_multipolygon((17.3, 59.2), {}))
+        self.assertFalse(geo.point_in_multipolygon((17.3, 59.2), None))

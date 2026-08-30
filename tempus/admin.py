@@ -44,3 +44,13 @@ class ChecklistAdmin(admin.ModelAdmin):
     search_fields = ('name', 'user__username')
     list_filter = ('start_date', 'end_date', 'geo_area', 'route')
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(tempus.models.BirdnetDevice)
+class BirdnetDeviceAdmin(admin.ModelAdmin):
+    list_display = ('identifier', 'name', 'house', 'is_active', 'created_at', 'updated_at')
+    list_filter = ('is_active', 'house')
+    search_fields = ('identifier', 'name')
+    filter_horizontal = ('users',)
+    readonly_fields = ('created_at', 'updated_at')
+

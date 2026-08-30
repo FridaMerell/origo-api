@@ -59,6 +59,10 @@ class TaskSerializer(serializers.ModelSerializer):
             'title',
             'description',
             'due_date',
+            'recurrence',
+            'recurrence_interval',
+            'recurrence_end_date',
+            'recurrence_source',
             'priority',
             'status',
             'created_at',
@@ -66,7 +70,13 @@ class TaskSerializer(serializers.ModelSerializer):
             'files',
             'update_count'
         ]
-        read_only_fields = ['subtasks', 'required_by', 'created_at', 'updated_at']
+        read_only_fields = [
+            'subtasks',
+            'required_by',
+            'recurrence_source',
+            'created_at',
+            'updated_at',
+        ]
 
     def validate_project(self, project):
         request = self.context['request']
@@ -129,6 +139,29 @@ class TaskSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'assignees': "Assignees must be members of the project."}
                 )
+
+        recurrence = attrs.get('recurrence', getattr(self.instance, 'recurrence', Task.Recurrence.NONE))
+        due_date = attrs.get('due_date', getattr(self.instance, 'due_date', None))
+        recurrence_interval = attrs.get(
+            'recurrence_interval',
+            getattr(self.instance, 'recurrence_interval', 1),
+        )
+        recurrence_end_date = attrs.get(
+            'recurrence_end_date',
+            getattr(self.instance, 'recurrence_end_date', None),
+        )
+        if recurrence != Task.Recurrence.NONE and due_date is None:
+            raise serializers.ValidationError(
+                {'due_date': "Recurring tasks must have a due date."}
+            )
+        if recurrence_interval < 1:
+            raise serializers.ValidationError(
+                {'recurrence_interval': "Recurrence interval must be at least 1."}
+            )
+        if recurrence_end_date is not None and due_date is not None and recurrence_end_date < due_date:
+            raise serializers.ValidationError(
+                {'recurrence_end_date': "Recurrence end date cannot be before the due date."}
+            )
 
         return attrs
 

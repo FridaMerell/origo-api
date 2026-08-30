@@ -4,10 +4,18 @@ These exercise the task functions with the *immediate* django-tasks backend, so
 ``enqueue`` runs the work inline. Requires ``django-tasks`` to be installed.
 """
 
+import datetime
+
 from django.test import TestCase, override_settings
 
 from tempus import tasks
-from tempus.models import GeoArea, Phenogram, Species
+from tempus.models import GeoArea, Phenogram, Route, RouteSuggestionRun, Species
+
+try:
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+except Exception:  # pragma: no cover
+    User = None
 
 IMMEDIATE = {"default": {"BACKEND": "django_tasks.backends.immediate.ImmediateBackend"}}
 
@@ -70,7 +78,7 @@ class GeneratePhenogramTaskTests(TestCase):
             tasks.fan_out_species_phenograms.enqueue(self.species.pk)
         self.assertEqual(len(enqueued), 2)
         self.assertEqual({args[1] for args, _ in enqueued},
-                         set(GeoArea.objects.values_list("pk", flat=True)))
+                         {str(pk) for pk in GeoArea.objects.values_list("pk", flat=True)})
 
     def test_fan_out_area_enqueues_one_per_species(self):
         Species.objects.create(dyntaxa_taxon_id=222, scientific_name="Pieris napi")
@@ -79,6 +87,50 @@ class GeneratePhenogramTaskTests(TestCase):
                     lambda *a, **k: enqueued.append(a)):
             tasks.fan_out_area_phenograms.enqueue(self.area.pk)
         self.assertEqual(len(enqueued), 2)
+
+
+@override_settings(TASKS=IMMEDIATE)
+class ComputeRouteSuggestionsTaskTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="r", password="x")
+        self.route = Route.objects.create(
+            user=self.user, name="Trip", planned_date=datetime.date(2026, 6, 1),
+            corridor_metres=2000,
+            geometry={"type": "LineString",
+                      "coordinates": [[18.06, 59.33], [17.64, 59.86]]},
+        )
+
+    def test_success_stores_result_on_the_run(self):
+        RouteSuggestionRun.objects.create(route=self.route, params={"num_stops": 3})
+        stops = [{"rank": 1, "score": 9.9}]
+        with _patch(tasks.route_planner, "suggest_rest_stops",
+                    lambda geom, cm, **kw: stops):
+            tasks.compute_route_suggestions.enqueue(str(self.route.pk))
+        run = RouteSuggestionRun.objects.get(route=self.route)
+        self.assertEqual(run.status, RouteSuggestionRun.SUCCEEDED)
+        self.assertEqual(run.result, stops)
+        self.assertIsNotNone(run.finished_at)
+        self.assertEqual(run.error, "")
+
+    def test_api_failure_marks_the_run_failed(self):
+        RouteSuggestionRun.objects.create(route=self.route)
+
+        def boom(*a, **k):
+            raise tasks.artdatabanken.ArtdatabankenAPIError("POST", "/x", 502, "down")
+
+        with _patch(tasks.route_planner, "suggest_rest_stops", boom):
+            tasks.compute_route_suggestions.enqueue(str(self.route.pk))
+        run = RouteSuggestionRun.objects.get(route=self.route)
+        self.assertEqual(run.status, RouteSuggestionRun.FAILED)
+        self.assertIn("down", run.error)
+
+    def test_creates_the_run_row_if_missing(self):
+        with _patch(tasks.route_planner, "suggest_rest_stops", lambda *a, **k: []):
+            tasks.compute_route_suggestions.enqueue(str(self.route.pk))
+        self.assertEqual(
+            RouteSuggestionRun.objects.get(route=self.route).status,
+            RouteSuggestionRun.SUCCEEDED,
+        )
 
 
 @override_settings(TASKS=IMMEDIATE)
@@ -91,7 +143,7 @@ class PhenogramSignalTests(TestCase):
                 species = Species.objects.create(
                     dyntaxa_taxon_id=1, scientific_name="X"
                 )
-        self.assertEqual(calls, [species.pk])
+        self.assertEqual(calls, [str(species.pk)])
 
     def test_geoarea_create_fans_out(self):
         calls = []
@@ -101,4 +153,4 @@ class PhenogramSignalTests(TestCase):
                 area = GeoArea.objects.create(
                     name="A", kind=GeoArea.Kind.COUNTY, country_code="SE", geometry=SWEDEN
                 )
-        self.assertEqual(calls, [area.pk])
+        self.assertEqual(calls, [str(area.pk)])

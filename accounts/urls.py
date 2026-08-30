@@ -1,13 +1,22 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from accounts.views import CSRFTokenView, LoginView, LogoutView, MeView, UserViewSet, SelfViewSet
+from accounts.views import (
+    CSRFTokenView,
+    LoginView,
+    LogoutView,
+    MeView,
+    NotificationViewSet,
+    SelfViewSet,
+    UserViewSet,
+)
 
 app_name = 'accounts'
 
 router = DefaultRouter()
 router.register('users', UserViewSet, basename='user')
 router.register('self', SelfViewSet, basename='self')
+router.register('notifications', NotificationViewSet, basename='notification')
 
 urlpatterns = [
     path('csrf/', CSRFTokenView.as_view(), name='csrf'),

@@ -9,14 +9,16 @@ mean nothing. So the score here is built from:
 * **richness**       - how many distinct taxa, effort-corrected;
 * **evenness**       - inverse Simpson index, so "100 crows + 3 others" scores
                        far below an even spread of the same richness;
-* **rarity**         - taxa that are seldom reported *along this whole route*
-                       but turn up here, red-listed taxa weighted extra;
-* **recency**        - a rare or red-listed taxon reported in the last few days
-                       (the "one very interesting bird was just seen" case).
+* **rarity**         - taxa whose *report* carries weight: seldom-reported or
+                       red-listed species, read from a precomputed per-taxon
+                       ``significance`` (0..1) rather than recomputed live;
+* **recency**        - a notable taxon reported in the last few days (the "one
+                       very interesting bird was just seen" case).
 
-Pure functions, no Django and no network. Feed it rows built from a SOS
-``TaxonAggregation`` plus a corridor-wide frequency table; the API glue lives in
-:mod:`tempus.services.route_planner`.
+Pure functions, no Django and no network. Each ``TaxonRow`` carries its own
+``significance`` - the caller looks it up (``Phenogram.significance`` /
+``Species.significance``, both filled during phenogram builds) and attaches it.
+``significance_from_cells`` is the shared formula used to fill those fields.
 """
 
 import math
@@ -28,12 +30,28 @@ W_EVENNESS = 1.0
 W_RARITY = 2.0
 W_RECENCY = 3.0
 
-# A taxon counts as "notable" when its corridor frequency is below this share
-# of all corridor observations, or it carries any red-list category.
-RARE_FREQUENCY = 0.01
+# A taxon counts toward the rarity and recency terms when its significance is at
+# least this, or it carries any red-list category.
+NOTABLE_SIGNIFICANCE = 0.5
+# Significance used for a taxon we have no precomputed value for (not locally
+# registered, or no phenogram in the area yet). Below NOTABLE_SIGNIFICANCE, so an
+# unknown taxon still counts toward richness/evenness but does not pile into the
+# rarity term.
+DEFAULT_SIGNIFICANCE = 0.3
+
+# significance_from_cells: an occupied-cell share of 10**-SIGNIFICANCE_LOG_SPAN
+# maps to 1.0; a share of 1.0 maps to 0.0.
+SIGNIFICANCE_LOG_SPAN = 4.0
+# In Sweden many still-common species are red-listed (declining populations), so
+# red-list status *adds* to significance rather than replacing it - a widespread
+# NT bird stays un-notable, a genuinely scarce one is pushed over the line, and
+# the threatened categories clear the bar on their own (DEFAULT_SIGNIFICANCE +
+# the VU/EN/CR bump > NOTABLE_SIGNIFICANCE).
+RED_LIST_BUMP = {"NT": 0.10, "DD": 0.15, "VU": 0.25, "EN": 0.40, "CR": 0.55, "RE": 0.55}
+
 # Recency bonus decays to zero over this many days.
 RECENCY_HALFLIFE_DAYS = 10.0
-RED_LIST_CATEGORIES = {"NT", "VU", "EN", "CR", "RE", "DD"}
+RED_LIST_CATEGORIES = set(RED_LIST_BUMP)
 
 
 @dataclass
@@ -46,10 +64,17 @@ class TaxonRow:
     vernacular_name: str = ""
     red_list_category: str = ""
     last_seen_days: float | None = None  # age in days of the most recent record
+    significance: float | None = None    # 0..1, precomputed; None -> default
 
     @property
     def red_listed(self) -> bool:
         return self.red_list_category.upper() in RED_LIST_CATEGORIES
+
+    @property
+    def effective_significance(self) -> float:
+        base = DEFAULT_SIGNIFICANCE if self.significance is None else self.significance
+        base += RED_LIST_BUMP.get(self.red_list_category.upper(), 0.0)
+        return max(0.0, min(1.0, base))
 
 
 @dataclass
@@ -83,6 +108,23 @@ class LocationScore:
     contributions: list[Contribution] = field(default_factory=list)
 
 
+def significance_from_cells(species_cells: int, area_cells: int) -> float | None:
+    """Rarity of a *report* of a taxon in an area, on a 0..1 scale.
+
+    ``species_cells`` / ``area_cells`` are occupied-grid-cell counts from
+    ``GeoGridAggregation`` (the taxon's footprint vs. all reporting effort in
+    the area) - both effort-robust, so a twitched rarity mobbed at one spot
+    fills one cell, not hundreds. Returns ``None`` when there is no effort
+    baseline to divide by. Red-list status is folded in later, at scoring time
+    (:attr:`TaxonRow.effective_significance`).
+    """
+    if area_cells <= 0:
+        return None
+    share = max(species_cells, 1) / area_cells
+    raw = -math.log10(min(share, 1.0)) / SIGNIFICANCE_LOG_SPAN
+    return round(max(0.0, min(1.0, raw)), 3)
+
+
 def richness(rows: list[TaxonRow]) -> int:
     return len({r.taxon_id for r in rows if r.count > 0})
 
@@ -106,22 +148,15 @@ def effort_correction(total_count: int) -> float:
     return math.sqrt(total_count) if total_count > 0 else 1.0
 
 
-def _rarity_weight(row: TaxonRow, corridor_freq: dict[int, float]) -> float:
-    """``-log(fᵢ)`` capped, times a red-list multiplier. ``fᵢ`` is the taxon's
-    share of all corridor observations; an unseen-elsewhere taxon is treated as
-    just below the rarest observed frequency.
-    """
-    freq = corridor_freq.get(row.taxon_id)
-    if not freq or freq <= 0:
-        freq = min([f for f in corridor_freq.values() if f > 0], default=RARE_FREQUENCY) / 2
-    weight = -math.log(min(freq, 1.0))
-    if row.red_listed:
-        weight *= 2.0
-    return max(0.0, weight)
+def _is_notable(row: TaxonRow) -> bool:
+    # effective_significance already folds in the red-list bump, so a widespread
+    # NT species is not notable while a threatened or genuinely scarce one is.
+    return row.effective_significance >= NOTABLE_SIGNIFICANCE
 
 
-def _is_notable(row: TaxonRow, corridor_freq: dict[int, float]) -> bool:
-    return row.red_listed or corridor_freq.get(row.taxon_id, 0.0) < RARE_FREQUENCY
+def _rarity_weight(row: TaxonRow) -> float:
+    """The taxon's contribution to the rarity term: just its significance."""
+    return row.effective_significance
 
 
 def _recency_weight(row: TaxonRow) -> float:
@@ -130,35 +165,31 @@ def _recency_weight(row: TaxonRow) -> float:
     return math.exp(-max(0.0, row.last_seen_days) / RECENCY_HALFLIFE_DAYS)
 
 
-def _reason(row: TaxonRow, recency_w: float,
-            corridor_freq: dict[int, float]) -> str:
+def _reason(row: TaxonRow, recency_w: float) -> str:
     parts: list[str] = []
     if row.red_listed:
         parts.append(f"red-listed ({row.red_list_category.upper()})")
-    if corridor_freq.get(row.taxon_id, 0.0) < RARE_FREQUENCY:
-        parts.append("rarely reported along this route")
+    if row.effective_significance >= NOTABLE_SIGNIFICANCE and not row.red_listed:
+        parts.append("rarely reported")
     if recency_w > 0.35 and row.last_seen_days is not None:
         d = int(round(row.last_seen_days))
         parts.append("seen today" if d <= 0 else f"seen {d} day{'s' if d != 1 else ''} ago")
     return "; ".join(parts) or "adds to the species mix"
 
 
-def rarity_score(rows: list[TaxonRow], corridor_freq: dict[int, float]) -> float:
-    return sum(_rarity_weight(r, corridor_freq) for r in rows
-              if r.count > 0 and _is_notable(r, corridor_freq))
+def rarity_score(rows: list[TaxonRow]) -> float:
+    return sum(_rarity_weight(r) for r in rows if r.count > 0 and _is_notable(r))
 
 
-def recency_bonus(rows: list[TaxonRow], corridor_freq: dict[int, float]) -> float:
+def recency_bonus(rows: list[TaxonRow]) -> float:
     """Sum of recency weights, but only for taxa that are actually notable -
     a fresh crow record must not light this up.
     """
-    return sum(_recency_weight(r) for r in rows
-              if r.count > 0 and _is_notable(r, corridor_freq))
+    return sum(_recency_weight(r) for r in rows if r.count > 0 and _is_notable(r))
 
 
 def score(
     rows: list[TaxonRow],
-    corridor_freq: dict[int, float],
     *,
     reference_richness: float = 0.0,
 ) -> LocationScore:
@@ -173,8 +204,8 @@ def score(
     rich = richness(live)
     inv_simpson = inverse_simpson(live)
     corrected_richness = rich / effort_correction(total)
-    rar = rarity_score(live, corridor_freq)
-    rec = recency_bonus(live, corridor_freq)
+    rar = rarity_score(live)
+    rec = recency_bonus(live)
 
     richness_term = W_RICHNESS * (corrected_richness - reference_richness)
     evenness_term = W_EVENNESS * math.log(inv_simpson) if inv_simpson > 1 else 0.0
@@ -184,9 +215,9 @@ def score(
 
     contributions: list[Contribution] = []
     for r in live:
-        if not _is_notable(r, corridor_freq):
+        if not _is_notable(r):
             continue
-        rw = _rarity_weight(r, corridor_freq)
+        rw = _rarity_weight(r)
         cw = _recency_weight(r)
         contributions.append(Contribution(
             taxon_id=r.taxon_id,
@@ -197,7 +228,7 @@ def score(
             last_seen_days=r.last_seen_days,
             rarity_weight=round(W_RARITY * rw, 3),
             recency_weight=round(W_RECENCY * cw, 3),
-            reason=_reason(r, cw, corridor_freq),
+            reason=_reason(r, cw),
         ))
     contributions.sort(key=lambda c: c.weight, reverse=True)
 
@@ -217,11 +248,3 @@ def score(
         },
         contributions=contributions,
     )
-
-
-def corridor_frequencies(taxon_counts: dict[int, int]) -> dict[int, float]:
-    """Turn a corridor-wide ``{taxon_id: count}`` table into shares that sum to 1."""
-    total = sum(taxon_counts.values())
-    if total <= 0:
-        return {tid: 0.0 for tid in taxon_counts}
-    return {tid: c / total for tid, c in taxon_counts.items()}

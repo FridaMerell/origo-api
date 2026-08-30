@@ -8,6 +8,38 @@ WARBLER = 205835    # a scarce, red-listed warbler - the "interesting bird"
 MALLARD = 202803
 TIT = 199324
 
+# Precomputed rarity (0..1) as the caller would attach it.
+COMMON = 0.05
+SCARCE = 0.85
+
+
+class SignificanceFromCellsTests(SimpleTestCase):
+    def test_widespread_species_scores_low(self):
+        # occupies most cells that have any reports at all
+        value = diversity.significance_from_cells(900, 1_000)
+        self.assertLess(value, 0.1)
+
+    def test_localised_species_scores_high(self):
+        value = diversity.significance_from_cells(1, 10_000)
+        self.assertGreater(value, 0.9)
+
+    def test_no_effort_baseline_is_none(self):
+        self.assertIsNone(diversity.significance_from_cells(5, 0))
+
+
+class RedListBumpTests(SimpleTestCase):
+    def test_widespread_nt_bird_stays_un_notable(self):
+        row = TaxonRow(1, 5, red_list_category="NT", significance=0.05)
+        self.assertLess(row.effective_significance, diversity.NOTABLE_SIGNIFICANCE)
+
+    def test_scarce_nt_bird_is_pushed_over_the_line(self):
+        row = TaxonRow(1, 5, red_list_category="NT", significance=0.45)
+        self.assertGreaterEqual(row.effective_significance, diversity.NOTABLE_SIGNIFICANCE)
+
+    def test_threatened_category_is_notable_without_data(self):
+        row = TaxonRow(1, 5, red_list_category="EN")  # significance=None
+        self.assertGreaterEqual(row.effective_significance, diversity.NOTABLE_SIGNIFICANCE)
+
 
 class InverseSimpsonTests(SimpleTestCase):
     def test_single_dominant_taxon_collapses_to_one(self):
@@ -30,51 +62,57 @@ class RichnessTests(SimpleTestCase):
 
 
 class ScoreTests(SimpleTestCase):
-    def setUp(self):
-        # Corridor-wide: crows and mallards everywhere, the warbler almost never.
-        self.corridor_freq = diversity.corridor_frequencies({
-            CROW: 5_000, MALLARD: 3_000, TIT: 1_500, WARBLER: 3,
-        })
-
     def test_one_rare_recent_bird_beats_a_hundred_crows(self):
-        crow_spot = [TaxonRow(CROW, 100, scientific_name="Corvus cornix")]
+        crow_spot = [TaxonRow(CROW, 100, scientific_name="Corvus cornix",
+                              significance=COMMON)]
         warbler_spot = [TaxonRow(
             WARBLER, 1, scientific_name="Acrocephalus paludicola",
             vernacular_name="vattensångare",
-            red_list_category="EN", last_seen_days=2,
+            red_list_category="EN", last_seen_days=2, significance=SCARCE,
         )]
-        crow = diversity.score(crow_spot, self.corridor_freq)
-        warbler = diversity.score(warbler_spot, self.corridor_freq)
-        self.assertGreater(warbler.score, crow.score)
+        self.assertGreater(
+            diversity.score(warbler_spot).score, diversity.score(crow_spot).score
+        )
+
+    def test_scarce_species_beats_common_even_without_red_list(self):
+        common_spot = [TaxonRow(CROW, 80, significance=COMMON)]
+        scarce_spot = [TaxonRow(TIT, 3, significance=SCARCE)]
+        self.assertGreater(
+            diversity.score(scarce_spot).score, diversity.score(common_spot).score
+        )
 
     def test_contributions_name_the_interesting_taxon(self):
         rows = [
-            TaxonRow(CROW, 40, scientific_name="Corvus cornix"),
+            TaxonRow(CROW, 40, scientific_name="Corvus cornix", significance=COMMON),
             TaxonRow(WARBLER, 1, scientific_name="Acrocephalus paludicola",
-                     red_list_category="EN", last_seen_days=1),
+                     red_list_category="EN", last_seen_days=1, significance=SCARCE),
         ]
-        result = diversity.score(rows, self.corridor_freq)
+        result = diversity.score(rows)
         self.assertTrue(result.contributions)
         top = result.contributions[0]
         self.assertEqual(top.taxon_id, WARBLER)
         self.assertIn("red-listed", top.reason)
         self.assertIn("day", top.reason)
-        # A plain crow record must not become a contribution.
         self.assertNotIn(CROW, [c.taxon_id for c in result.contributions])
 
+    def test_unknown_significance_falls_back_to_default(self):
+        row = TaxonRow(TIT, 5)  # significance=None
+        self.assertEqual(row.effective_significance, diversity.DEFAULT_SIGNIFICANCE)
+
     def test_fresh_common_bird_does_not_trigger_recency(self):
-        rows = [TaxonRow(CROW, 3, scientific_name="Corvus cornix", last_seen_days=0)]
-        result = diversity.score(rows, self.corridor_freq)
-        self.assertEqual(result.recency, 0.0)
+        rows = [TaxonRow(CROW, 3, last_seen_days=0, significance=COMMON)]
+        self.assertEqual(diversity.score(rows).recency, 0.0)
 
     def test_effort_correction_damps_high_volume_spots(self):
-        # Same richness, 100x the reports -> the busy spot's richness term is
-        # divided by a larger factor.
         self.assertGreater(diversity.effort_correction(10_000),
                            diversity.effort_correction(100))
-        quiet = [TaxonRow(CROW, 1), TaxonRow(MALLARD, 1), TaxonRow(TIT, 1)]
-        busy = [TaxonRow(CROW, 100), TaxonRow(MALLARD, 100), TaxonRow(TIT, 100)]
+        quiet = [TaxonRow(CROW, 1, significance=COMMON),
+                 TaxonRow(MALLARD, 1, significance=COMMON),
+                 TaxonRow(TIT, 1, significance=COMMON)]
+        busy = [TaxonRow(CROW, 100, significance=COMMON),
+                TaxonRow(MALLARD, 100, significance=COMMON),
+                TaxonRow(TIT, 100, significance=COMMON)]
         self.assertGreater(
-            diversity.score(quiet, self.corridor_freq).breakdown["corrected_richness"],
-            diversity.score(busy, self.corridor_freq).breakdown["corrected_richness"],
+            diversity.score(quiet).breakdown["corrected_richness"],
+            diversity.score(busy).breakdown["corrected_richness"],
         )

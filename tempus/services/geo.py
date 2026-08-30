@@ -99,6 +99,48 @@ def bbox_centroid(bbox) -> Coord:
     return ((min_lon + max_lon) / 2.0, (min_lat + max_lat) / 2.0)
 
 
+def _point_in_ring(lon: float, lat: float, ring) -> bool:
+    """Ray-casting test for a single linear ring of ``[lon, lat]`` pairs."""
+    inside = False
+    n = len(ring)
+    for i in range(n):
+        x1, y1 = ring[i][0], ring[i][1]
+        x2, y2 = ring[(i + 1) % n][0], ring[(i + 1) % n][1]
+        if (y1 > lat) != (y2 > lat):
+            x_cross = x1 + (lat - y1) * (x2 - x1) / ((y2 - y1) or 1e-16)
+            if lon < x_cross:
+                inside = not inside
+    return inside
+
+
+def point_in_polygon(point, polygon_coords) -> bool:
+    """``point`` inside a GeoJSON Polygon ``coordinates`` (outer ring minus holes)."""
+    if not polygon_coords:
+        return False
+    lon, lat = _coord(point)
+    if not _point_in_ring(lon, lat, polygon_coords[0]):
+        return False
+    return not any(_point_in_ring(lon, lat, hole) for hole in polygon_coords[1:])
+
+
+def point_in_multipolygon(point, geometry) -> bool:
+    """``point`` inside a GeoJSON ``Polygon`` or ``MultiPolygon`` dict.
+
+    Tolerant of an empty/missing geometry (returns ``False``). Coordinates are
+    treated as planar ``[lon, lat]`` - fine for point-in-province at Swedish
+    scale.
+    """
+    if not isinstance(geometry, dict):
+        return False
+    gtype = geometry.get("type")
+    coords = geometry.get("coordinates") or []
+    if gtype == "Polygon":
+        return point_in_polygon(point, coords)
+    if gtype == "MultiPolygon":
+        return any(point_in_polygon(point, poly) for poly in coords)
+    return False
+
+
 def nearest_point_on_line(coords, point) -> tuple[Coord, float]:
     """Closest point on the polyline to ``point`` and its distance in metres.
 
@@ -128,6 +170,36 @@ def nearest_point_on_line(coords, point) -> tuple[Coord, float]:
             best_d2, best_xy = d2, (cx, cy)
     snapped = (plon + best_xy[0] / mx, plat + best_xy[1] / my)
     return snapped, math.sqrt(best_d2)
+
+
+def distance_along_line(coords, point) -> float:
+    """Arc length (metres) from the start of the polyline to the projection of
+    ``point`` onto it - i.e. "how far along the route is this"."""
+    plon, plat = _coord(point)
+    lat0 = math.radians(plat)
+    mx = math.cos(lat0) * EARTH_RADIUS_M * math.pi / 180.0
+    my = EARTH_RADIUS_M * math.pi / 180.0
+
+    def to_xy(c: Coord) -> tuple[float, float]:
+        return ((c[0] - plon) * mx, (c[1] - plat) * my)
+
+    pts = [_coord(c) for c in coords]
+    seg_lengths = segment_lengths(pts)
+    run = 0.0
+    best_d2, best_along = math.inf, 0.0
+    for i, (a, b) in enumerate(zip(pts, pts[1:])):
+        ax, ay = to_xy(a)
+        bx, by = to_xy(b)
+        dx, dy = bx - ax, by - ay
+        seg2 = dx * dx + dy * dy
+        t = 0.0 if seg2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / seg2))
+        cx, cy = ax + dx * t, ay + dy * t
+        d2 = cx * cx + cy * cy
+        if d2 < best_d2:
+            best_d2 = d2
+            best_along = run + t * seg_lengths[i]
+        run += seg_lengths[i]
+    return best_along
 
 
 def snap_towards(point, coords, max_offset_m: float | None = None) -> Coord:

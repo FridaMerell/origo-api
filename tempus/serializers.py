@@ -1,7 +1,12 @@
+import csv
+import io
+
 from django.utils import timezone
 from rest_framework import serializers
 
 from tempus.models import (
+    BirdnetDevice,
+    BirdnetDetection,
     Checklist,
     ChecklistItem,
     GeoArea,
@@ -10,6 +15,7 @@ from tempus.models import (
     Phenophase,
     Route,
     RouteStop,
+    RouteSuggestionRun,
     Source,
     Species,
     SpeciesCategory,
@@ -33,11 +39,15 @@ def validate_geojson(value, expected_type):
 
 
 class SpeciesSerializer(serializers.ModelSerializer):
+    # Annotated per-request by SpeciesViewSet.get_queryset; False on writes.
+    is_followed = serializers.BooleanField(read_only=True, default=False)
+
     class Meta:
         model = Species
         fields = [
             "id",
             "dyntaxa_taxon_id",
+            "is_followed",
             "scientific_name",
             "swedish_name",
             "taxon_rank",
@@ -72,6 +82,107 @@ class RegisterSpeciesSerializer(serializers.Serializer):
         queryset=SpeciesCategory.objects.all()
     )
     dyntaxa_taxon_id = serializers.IntegerField(min_value=1)
+
+
+class SpeciesChecklistImportSerializer(serializers.Serializer):
+    """Input for queueing every taxon ID in an uploaded species checklist."""
+
+    MAX_FILE_SIZE = 2 * 1024 * 1024
+    MAX_TAXA = 10_000
+    TAXON_ID_HEADERS = {
+        "taxon id",
+        "taxonid",
+        "taxon id dyntaxa",
+        "dyntaxa taxon id",
+    }
+
+    species_category = serializers.PrimaryKeyRelatedField(
+        queryset=SpeciesCategory.objects.all()
+    )
+    file = serializers.FileField()
+
+    def validate(self, attrs):
+        uploaded_file = attrs["file"]
+        if uploaded_file.size > self.MAX_FILE_SIZE:
+            raise serializers.ValidationError(
+                {"file": f"The checklist must be at most {self.MAX_FILE_SIZE // (1024 * 1024)} MB."}
+            )
+
+        try:
+            text = uploaded_file.read().decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise serializers.ValidationError(
+                {"file": "The checklist must be a UTF-8 encoded CSV file."}
+            ) from exc
+
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t")
+        except csv.Error:
+            reader = csv.DictReader(io.StringIO(text), delimiter=";")
+        else:
+            reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+        if not reader.fieldnames:
+            raise serializers.ValidationError({"file": "The checklist has no header row."})
+
+        normalized_headers = {
+            " ".join(header.strip().casefold().replace("_", " ").replace("-", " ").split()): header
+            for header in reader.fieldnames
+            if header
+        }
+        taxon_header = next(
+            (
+                original
+                for normalized, original in normalized_headers.items()
+                if normalized in self.TAXON_ID_HEADERS
+            ),
+            None,
+        )
+        if taxon_header is None:
+            raise serializers.ValidationError(
+                {"file": 'The checklist must contain a "Taxon id" column.'}
+            )
+
+        taxon_ids = []
+        seen = set()
+        duplicate_count = 0
+        row_errors = []
+        for line_number, row in enumerate(reader, start=2):
+            raw_value = (row.get(taxon_header) or "").strip()
+            row_values = [
+                item
+                for value in row.values()
+                for item in (value if isinstance(value, list) else [value])
+            ]
+            if not raw_value and not any(
+                str(value or "").strip() for value in row_values
+            ):
+                continue
+            try:
+                taxon_id = int(raw_value)
+                if taxon_id < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                row_errors.append(f"Line {line_number}: invalid Taxon id {raw_value!r}.")
+                continue
+
+            if taxon_id in seen:
+                duplicate_count += 1
+                continue
+            seen.add(taxon_id)
+            taxon_ids.append(taxon_id)
+            if len(taxon_ids) > self.MAX_TAXA:
+                raise serializers.ValidationError(
+                    {"file": f"The checklist may contain at most {self.MAX_TAXA} unique taxon IDs."}
+                )
+
+        if row_errors:
+            raise serializers.ValidationError({"file": row_errors})
+        if not taxon_ids:
+            raise serializers.ValidationError({"file": "The checklist contains no taxon IDs."})
+
+        attrs["taxon_ids"] = taxon_ids
+        attrs["duplicate_count"] = duplicate_count
+        return attrs
 
 
 class SpeciesResyncSerializer(serializers.Serializer):
@@ -147,6 +258,86 @@ class PhenogramQuerySerializer(serializers.Serializer):
     refresh = serializers.BooleanField(required=False)
 
 
+class SeasonalOverviewQuerySerializer(serializers.Serializer):
+    """Filters for the species seasonal-overview endpoint."""
+
+    geo_area = serializers.PrimaryKeyRelatedField(queryset=GeoArea.objects.all())
+    min_records = serializers.IntegerField(min_value=0, required=False, default=20)
+    status = serializers.CharField(
+        required=False,
+        default="coming_into_season,going_out_of_season",
+    )
+
+    def validate_status(self, value):
+        statuses = [item.strip() for item in value.split(",") if item.strip()]
+        if not statuses:
+            raise serializers.ValidationError("Pass at least one seasonal status.")
+
+        invalid = [item for item in statuses if not season.valid_status(item)]
+        if invalid:
+            raise serializers.ValidationError(
+                f"Unknown status value(s): {', '.join(invalid)}."
+            )
+        return list(dict.fromkeys(statuses))
+
+
+class SeasonalOverviewSerializer(serializers.ModelSerializer):
+    """Compact species card backed by one stored area phenogram."""
+
+    id = serializers.UUIDField(source="species.id", read_only=True)
+    dyntaxa_taxon_id = serializers.IntegerField(
+        source="species.dyntaxa_taxon_id", read_only=True
+    )
+    swedish_name = serializers.CharField(source="species.swedish_name", read_only=True)
+    scientific_name = serializers.CharField(
+        source="species.scientific_name", read_only=True
+    )
+    is_followed = serializers.BooleanField(read_only=True, default=False)
+    seasonal_status = serializers.SerializerMethodField()
+    activity_window = serializers.SerializerMethodField()
+    habitats = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Phenogram
+        fields = [
+            "id",
+            "dyntaxa_taxon_id",
+            "swedish_name",
+            "scientific_name",
+            "is_followed",
+            "record_count",
+            "seasonal_status",
+            "activity_window",
+            "peak_week",
+            "habitats",
+        ]
+        read_only_fields = fields
+
+    def get_seasonal_status(self, obj):
+        return getattr(obj, "_seasonal_status", None) or season.status_for(obj)
+
+    def get_activity_window(self, obj):
+        return {
+            "start_week": obj.window_start_week,
+            "end_week": obj.window_end_week,
+        }
+
+    def get_habitats(self, obj):
+        habitats = obj.species.biotopes or obj.species.landscape_types or []
+        ordered = sorted(
+            habitats,
+            key=lambda item: item.get("significance") != "stor",
+        )
+        names = []
+        for item in ordered:
+            name = item.get("name")
+            if name and name not in names:
+                names.append(name)
+            if len(names) == 3:
+                break
+        return names
+
+
 class PhenogramSerializer(serializers.ModelSerializer):
     activity_window = serializers.SerializerMethodField()
     stale = serializers.SerializerMethodField()
@@ -196,6 +387,11 @@ class PhenogramSerializer(serializers.ModelSerializer):
 
 class SpeciesFollowSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Address the species by its Dyntaxa taxon id rather than the internal UUID.
+    species = serializers.SlugRelatedField(
+        slug_field="dyntaxa_taxon_id",
+        queryset=Species.objects.all(),
+    )
 
     class Meta:
         model = SpeciesFollow
@@ -269,6 +465,47 @@ class RouteStopSerializer(serializers.ModelSerializer):
 
     def validate_location(self, value):
         return validate_geojson(value, "Point")
+
+
+class SuggestedStopsQuerySerializer(serializers.Serializer):
+    """Query params for the route ``suggested-stops`` action.
+
+    All optional. ``taxon_id`` restricts scoring to a Dyntaxa taxon subtree
+    (e.g. Aves = 4000104 for "bird stops"); ``since_days`` is the observation
+    window used for scoring; ``notable_days`` is the cutoff for the "recent
+    notable" list; ``max_detour_m`` drops stops that sit further than that off
+    the route; ``num_stops`` caps the result; ``edge_buffer_m`` drops stops too
+    close to either end of the route; ``min_gap_m`` is the minimum along-route
+    spacing between stops. The last two default to fractions of route length.
+    """
+
+    taxon_id = serializers.IntegerField(min_value=1, required=False)
+    since_days = serializers.IntegerField(min_value=1, max_value=365, required=False)
+    notable_days = serializers.IntegerField(min_value=1, max_value=365, required=False)
+    max_detour_m = serializers.FloatField(min_value=0, required=False)
+    num_stops = serializers.IntegerField(min_value=1, max_value=25, required=False)
+    # exclude stops within this many metres of either end of the route
+    edge_buffer_m = serializers.FloatField(min_value=0, required=False)
+    # minimum along-route spacing between kept stops
+    min_gap_m = serializers.FloatField(min_value=0, required=False)
+
+
+class RouteSuggestionRunSerializer(serializers.ModelSerializer):
+    """Read-only view of a route's current rest-stop suggestion computation."""
+
+    class Meta:
+        model = RouteSuggestionRun
+        fields = [
+            "route",
+            "status",
+            "params",
+            "result",
+            "error",
+            "created_at",
+            "started_at",
+            "finished_at",
+        ]
+        read_only_fields = fields
 
 
 class ChecklistSerializer(serializers.ModelSerializer):
@@ -398,3 +635,105 @@ class ObservationSerializer(serializers.ModelSerializer):
             instance.checklist_items.set(items)
         link_observation_to_checklists(instance)
         return instance
+
+
+class BirdnetDeviceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BirdnetDevice
+        fields = [
+            "id",
+            "identifier",
+            "name",
+            "users",
+            "house",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+        extra_kwargs = {"users": {"required": False}}
+
+    def validate_house(self, house):
+        request = self.context["request"]
+        if house is not None and not house.members.filter(pk=request.user.pk).exists():
+            raise serializers.ValidationError("You must be a member of this house.")
+        return house
+
+    def validate(self, attrs):
+        house = attrs.get("house", getattr(self.instance, "house", None))
+        users = attrs.get("users")
+        if users is None and self.instance is not None:
+            users = self.instance.users.all()
+        if house is not None and users is not None:
+            house_member_ids = set(house.members.values_list("pk", flat=True))
+            if any(user.pk not in house_member_ids for user in users):
+                raise serializers.ValidationError(
+                    {"users": "All device users must be members of the selected house."}
+                )
+        return attrs
+
+
+class BirdnetMatchedSpeciesSerializer(serializers.ModelSerializer):
+    """The resolved :class:`Species` for a detection - ``null`` when the posted
+    scientific name matched no registered taxon."""
+
+    class Meta:
+        model = Species
+        fields = ["id", "dyntaxa_taxon_id", "scientific_name", "swedish_name"]
+        read_only_fields = fields
+
+
+class BirdnetDetectionSerializer(serializers.ModelSerializer):
+    """Ingest/representation for a BirdNET detection.
+
+    Wire format matches what the field device posts: ``species`` (scientific
+    name) and ``detectedAt`` (ISO 8601). ``species`` (the raw name) is resolved
+    to a :class:`Species` at ingest; that match is exposed read-only as
+    ``matched_species`` (``null`` when nothing matched) and is not part of the
+    posted payload.
+    """
+
+    species = serializers.CharField(source="scientific_name")
+    matched_species = BirdnetMatchedSpeciesSerializer(
+        source="species", read_only=True, allow_null=True
+    )
+    detectedAt = serializers.DateTimeField(source="detected_at")
+    device_id = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = BirdnetDetection
+        fields = [
+            "id",
+            "species",
+            "matched_species",
+            "confidence",
+            "detectedAt",
+            "device_id",
+            "created_at",
+        ]
+        read_only_fields = ["id", "matched_species", "created_at"]
+
+    def create(self, validated_data):
+        device_id = validated_data.pop("device_id")
+        request = self.context["request"]
+        try:
+            validated_data["device"] = BirdnetDevice.objects.get(
+                identifier=device_id,
+                is_active=True,
+                users=request.user,
+            )
+        except BirdnetDevice.DoesNotExist:
+            raise serializers.ValidationError(
+                {"device_id": "Unknown, inactive, or unauthorized device."}
+            )
+        validated_data["species"] = (
+            Species.objects.filter(
+                scientific_name__iexact=validated_data["scientific_name"]
+            ).first()
+        )
+        return super().create(validated_data)
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        representation["device_id"] = instance.device.identifier
+        return representation

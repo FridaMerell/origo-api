@@ -17,6 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from tempus.views import BirdnetDetectionIngestView, BirdnetDetectionStreamView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/accounts/', include('accounts.urls')),
@@ -24,4 +26,6 @@ urlpatterns = [
     path('api/verso/', include('verso.urls')),
     path('api/apsis/', include('apsis.urls')),
     path('api/tempus/', include('tempus.urls')),
+    path('api/birdnet/detections', BirdnetDetectionIngestView.as_view(), name='birdnet-detections'),
+    path('api/birdnet/detections/stream', BirdnetDetectionStreamView.as_view(), name='birdnet-detection-stream'),
 ]

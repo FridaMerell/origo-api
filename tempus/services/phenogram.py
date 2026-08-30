@@ -21,10 +21,14 @@ on the developer portal.
 """
 
 import datetime
+import logging
 
+from django.core.cache import cache
 from django.utils import timezone
 
-from tempus.services import artdatabanken, phenology
+from tempus.services import artdatabanken, diversity, phenology
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_YEARS = 8
 MAX_YEARS = 30
@@ -33,6 +37,13 @@ DEFAULT_SMOOTH_WEEKS = 1
 # Cap the observation crawl. Declustering already removes mob bias, so a sample
 # is enough for a phenogram; this keeps a common species to ~4 SOS pages.
 DEFAULT_MAX_RECORDS = 4000
+
+# Grid zoom for the occupied-cell counts behind Phenogram.significance. Coarse
+# enough that a twitched rarity mobbed at one spot fills one cell, not many.
+SIGNIFICANCE_GRID_ZOOM = 10
+# The area-wide "all taxa" occupied-cell count is the same for every species in
+# an area, so cache it across a fan-out.
+SIGNIFICANCE_AREA_CACHE_TTL = 24 * 60 * 60
 
 
 def _date_filter(years: int, *, today: datetime.date) -> dict:
@@ -152,6 +163,67 @@ def _row_defaults(curve: dict) -> dict:
     }
 
 
+def _occupied_cells(grid) -> int:
+    """Number of grid cells with at least one observation, tolerant of the
+    ``gridCells`` / ``records`` key difference between API versions."""
+    cells = (grid or {}).get("gridCells") or (grid or {}).get("records") or []
+    return sum(
+        1 for c in cells
+        if int(c.get("observationsCount") or c.get("count") or 0) > 0
+    )
+
+
+def _significance(species, geo_area, curve):
+    """``(value, basis)`` - rarity of a *report* of this species in this area,
+    from the occupied-cell share against all reporting effort there.
+
+    Two ``GeoGridAggregation`` calls: one filtered to the species, one (cached
+    per area+window) for all taxa. ``geo_area=None`` measures against the whole
+    country.
+    """
+    date = {
+        "startDate": curve["date_from"],
+        "endDate": curve["date_to"],
+        "dateFilterType": "BetweenStartDateAndEndDate",
+    }
+    base = {"date": date, "occurrenceStatus": "Present"}
+    if geo_area is not None and geo_area.geometry:
+        base["geographics"] = {"geometries": [geo_area.geometry]}
+
+    from django.conf import settings
+    grid_timeout = float(
+        (getattr(settings, "ARTDATABANKEN", {}) or {}).get(
+            "PHENOGRAM_TIMEOUT", 60
+        )
+    )
+
+    area_key = "tempus:sig_area:{}:{}:{}:{}".format(
+        geo_area.pk if geo_area is not None else "range",
+        curve["date_from"], curve["date_to"], SIGNIFICANCE_GRID_ZOOM,
+    )
+    area_cells = cache.get(area_key)
+    if area_cells is None:
+        area_cells = _occupied_cells(artdatabanken.geo_grid_aggregation(
+            base, zoom=SIGNIFICANCE_GRID_ZOOM, timeout=grid_timeout))
+        cache.set(area_key, area_cells, SIGNIFICANCE_AREA_CACHE_TTL)
+
+    species_flt = {
+        **base,
+        "taxon": {"ids": [species.dyntaxa_taxon_id], "includeUnderlyingTaxa": True},
+    }
+    species_cells = _occupied_cells(artdatabanken.geo_grid_aggregation(
+        species_flt, zoom=SIGNIFICANCE_GRID_ZOOM, timeout=grid_timeout))
+
+    value = diversity.significance_from_cells(species_cells, area_cells)
+    basis = {
+        "species_cells": species_cells,
+        "area_cells": area_cells,
+        "share": round(species_cells / area_cells, 6) if area_cells else None,
+        "zoom": SIGNIFICANCE_GRID_ZOOM,
+    }
+    return value, basis
+
+
 def get_phenogram(
     species,
     geo_area=None,
@@ -169,7 +241,7 @@ def get_phenogram(
     instead, getting ``None`` until the worker has run. Never triggered by a
     plain read.
     """
-    from tempus.models import Phenogram
+    from tempus.models import Phenogram, Species
 
     years = max(1, min(int(years), MAX_YEARS))
     existing = Phenogram.objects.filter(
@@ -186,10 +258,27 @@ def get_phenogram(
         years=years,
         today=today,
     )
+    defaults = _row_defaults(curve)
+    try:
+        value, basis = _significance(species, geo_area, curve)
+        defaults["significance"] = value
+        defaults["significance_basis"] = basis
+    except (
+        artdatabanken.ArtdatabankenConfigurationError,
+        artdatabanken.ArtdatabankenAPIError,
+    ) as exc:
+        logger.warning(
+            "significance for %s / %s skipped: %s", species, geo_area or "range", exc
+        )
+
     row, _ = Phenogram.objects.update_or_create(
         species=species,
         geo_area=geo_area,
         years=years,
-        defaults=_row_defaults(curve),
+        defaults=defaults,
     )
+    if geo_area is None and defaults.get("significance") is not None:
+        Species.objects.filter(pk=species.pk).update(
+            significance=defaults["significance"]
+        )
     return row
