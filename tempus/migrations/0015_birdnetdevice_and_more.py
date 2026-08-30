@@ -29,10 +29,6 @@ class Migration(migrations.Migration):
                 'ordering': ('name', 'identifier'),
             },
         ),
-        migrations.RemoveIndex(
-            model_name='birdnetdetection',
-            name='tempus_bird_device__30ca8d_idx',
-        ),
         migrations.AddField(
             model_name='birdnetdevice',
             name='house',
@@ -43,6 +39,14 @@ class Migration(migrations.Migration):
             name='users',
             field=models.ManyToManyField(related_name='birdnet_devices', to=settings.AUTH_USER_MODEL),
         ),
+        migrations.RemoveIndex(
+            model_name='birdnetdetection',
+            name='tempus_bird_device__30ca8d_idx',
+        ),
+        migrations.RemoveField(
+            model_name='birdnetdetection',
+            name='device_id',
+        ),
         migrations.AddField(
             model_name='birdnetdetection',
             name='device',
@@ -52,9 +56,5 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='birdnetdetection',
             index=models.Index(fields=['device', '-detected_at'], name='tempus_bird_birdnet_b5efe3_idx'),
-        ),
-        migrations.RemoveField(
-            model_name='birdnetdetection',
-            name='device_id',
         ),
     ]
