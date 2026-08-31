@@ -4,8 +4,10 @@ from rest_framework.routers import DefaultRouter
 from flux.views import (
     CodexProjectPlanDetailView,
     CodexProjectPlanListView,
+    DocumentViewSet,
     MilestoneViewSet,
     ProjectViewSet,
+    TagViewSet,
     TaskViewSet,
     UpdateViewSet,
 )
@@ -15,6 +17,8 @@ app_name = 'flux'
 router = DefaultRouter()
 router.register('projects', ProjectViewSet, basename='project')
 router.register('milestones', MilestoneViewSet, basename='milestone')
+router.register('tags', TagViewSet, basename='tag')
+router.register('documents', DocumentViewSet, basename='document')
 router.register('tasks', TaskViewSet, basename='task')
 router.register('updates', UpdateViewSet, basename='update')
 

@@ -1,4 +1,5 @@
 from rest_framework import permissions, status, viewsets
+from django.db import models
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -9,8 +10,15 @@ from flux.codex_plans import (
     import_project_plan_for_user,
     list_private_project_plans_for_user,
 )
-from flux.models import Milestone, Project, Task, Update
-from flux.serializers import MilestoneSerializer, ProjectSerializer, TaskSerializer, UpdateSerializer
+from flux.models import Document, Milestone, Project, Tag, Task, Update
+from flux.serializers import (
+    DocumentSerializer,
+    MilestoneSerializer,
+    ProjectSerializer,
+    TagSerializer,
+    TaskSerializer,
+    UpdateSerializer,
+)
 
 
 class CodexProjectPlanListView(APIView):
@@ -78,6 +86,45 @@ class MilestoneViewSet(viewsets.ModelViewSet):
             .select_related('project')
             .prefetch_related('updates')
         )
+
+
+class TagViewSet(viewsets.ModelViewSet):
+    serializer_class = TagSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['id', 'name']
+
+    def get_queryset(self):
+        queryset = (
+            Tag.objects.filter(
+                models.Q(created_by=self.request.user)
+                | models.Q(projects__members=self.request.user)
+                | models.Q(milestones__project__members=self.request.user)
+            )
+            .distinct()
+            .select_related('created_by')
+        )
+        if self.action in ('retrieve', 'update', 'partial_update', 'destroy'):
+            return queryset.filter(created_by=self.request.user)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
+class DocumentViewSet(viewsets.ModelViewSet):
+    serializer_class = DocumentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['id', 'project', 'milestone', 'task', 'kind']
+
+    def get_queryset(self):
+        return (
+            Document.objects.filter(project__members=self.request.user)
+            .distinct()
+            .select_related('project', 'milestone', 'task', 'author')
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
 
 
 class TaskViewSet(viewsets.ModelViewSet):

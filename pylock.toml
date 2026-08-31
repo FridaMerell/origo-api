@@ -1,0 +1,310 @@
+lock-version = "1.0"
+created-by = "pip"
+
+[[packages]]
+name = "asgiref"
+version = "3.12.1"
+
+[[packages.wheels]]
+name = "asgiref-3.12.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/c0/1b/54f4ad77cd8a584fa70746c47df988e002cf1ee1eba43364d46f87803647/asgiref-3.12.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "fe386d1c2bff7259ea95929266d12a8cf9a8b5a1c2598402967d8792e7a7c094"
+
+[[packages]]
+name = "certifi"
+version = "2026.7.22"
+
+[[packages.wheels]]
+name = "certifi-2026.7.22-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+
+[[packages]]
+name = "cffi"
+version = "2.1.1"
+
+[[packages.wheels]]
+name = "cffi-2.1.1-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/a7/06/1c3e01e3ba14c39f6d10bfbac52753b7e22259e38088e5cfe1d704918690/cffi-2.1.1-cp314-cp314-win_amd64.whl"
+
+[packages.wheels.hashes]
+sha256 = "3222ba5d678f80a030e6afbcc33dc1ae5cb45facabb61cee2c7016b8432fde48"
+
+[[packages]]
+name = "charset-normalizer"
+version = "3.5.1"
+
+[[packages.wheels]]
+name = "charset_normalizer-3.5.1-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/7a/7c/4938c329b6a9d446f6a59aa2092ff7118f274209b5ed0e26893d1d30a63c/charset_normalizer-3.5.1-cp314-cp314-win_amd64.whl"
+
+[packages.wheels.hashes]
+sha256 = "c658c50ac0c98cd755a2dd50b7977d3bca7df401dcc47fbdfa87db53ef7d4e8b"
+
+[[packages]]
+name = "django"
+version = "6.1"
+
+[[packages.wheels]]
+name = "django-6.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/91/9c/ce847620134cfab903e75690c498af73b46abbede2912ea89bd76d5c1e76/django-6.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "6c132cd980c9392b06807d4ca52d72530d631dc65a85d9dacede00a780cefbbe"
+
+[[packages]]
+name = "django-cors-headers"
+version = "4.9.0"
+
+[[packages.wheels]]
+name = "django_cors_headers-4.9.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/30/d8/19ed1e47badf477d17fb177c1c19b5a21da0fd2d9f093f23be3fb86c5fab/django_cors_headers-4.9.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "15c7f20727f90044dcee2216a9fd7303741a864865f0c3657e28b7056f61b449"
+
+[[packages]]
+name = "django-filter"
+version = "26.1"
+
+[[packages.wheels]]
+name = "django_filter-26.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/1f/01/afffed1e3c4540fb75bf550a18b6176a9f6371b5f3e52b69a28995b6480c/django_filter-26.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "7d98ef2899218e6242619b532cb1b95af14e09dfcf74844aecb550ad27b59ff2"
+
+[[packages]]
+name = "django-stubs-ext"
+version = "6.1.0"
+
+[[packages.wheels]]
+name = "django_stubs_ext-6.1.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/ed/41/10b8d576651af4f1dc6bdfb0d8a203e8b3a55d60ae36ba305d0edcdb594f/django_stubs_ext-6.1.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "57273506823274700a707c8f404dfb52a12c4554daf1468dfb2bff857bb22074"
+
+[[packages]]
+name = "django-tasks"
+version = "0.12.0"
+
+[[packages.wheels]]
+name = "django_tasks-0.12.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/07/e7/40c45768e84efd77e3ae6ffdcd2b5540011036cbb00c6df6ef2a2ad69551/django_tasks-0.12.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "ffcc1d7bdfad3bc5ef9c2d498596c6546484c9ec6b182fb9709c691eb66a8709"
+
+[[packages]]
+name = "django-tasks-db"
+version = "0.13.0"
+
+[[packages.wheels]]
+name = "django_tasks_db-0.13.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/30/d2/8b10117fca37a2d1f2e45f4878ffa07cf6c0c8df1920e250db30e2228b9e/django_tasks_db-0.13.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "a3a47250b09d40e9b289851d2a550d840d29e59ee3e7115129831e291bb35576"
+
+[[packages]]
+name = "djangorestframework"
+version = "3.18.0"
+
+[[packages.wheels]]
+name = "djangorestframework-3.18.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/51/d7/7461738e819b853275b35fd35712a85806c09a327e1fd5f8ff766bdd317e/djangorestframework-3.18.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "381fc44d3249c9565c5f723850855b734e99030eb30957a49f506d3fe11d7dcb"
+
+[[packages]]
+name = "gevent"
+version = "26.8.0"
+
+[[packages.wheels]]
+name = "gevent-26.8.0-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/3c/21/44ebdb32eb5050c367c4ccf6d43627bf875847ef65d8455beff52044846c/gevent-26.8.0-cp314-cp314-win_amd64.whl"
+
+[packages.wheels.hashes]
+sha256 = "4fe56814f6d36d8fdfe0254909388fa58ccb61e7945d2f031a2dbd81f90ced4c"
+
+[[packages]]
+name = "greenlet"
+version = "3.5.5"
+
+[[packages.wheels]]
+name = "greenlet-3.5.5-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/2e/3d/5cc9701117ea4dc0eb7bf1f4f9b7888a6e2e5277ddfae095805ace50f2b6/greenlet-3.5.5-cp314-cp314-win_amd64.whl"
+
+[packages.wheels.hashes]
+sha256 = "7dffc5c859fe6059974df1e37d7923d654a83e2ae18fdd616994270e001115e1"
+
+[[packages]]
+name = "gunicorn"
+version = "26.2.0"
+
+[[packages.wheels]]
+name = "gunicorn-26.2.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3"
+
+[[packages]]
+name = "idna"
+version = "3.19"
+
+[[packages.wheels]]
+name = "idna-3.19-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4"
+
+[[packages]]
+name = "packaging"
+version = "26.3"
+
+[[packages.wheels]]
+name = "packaging-26.3-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+
+[[packages]]
+name = "psycopg"
+version = "3.3.4"
+
+[[packages.wheels]]
+name = "psycopg-3.3.4-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/5c/e0/7b3dee031daae7743609ce3c746565d4a3ed7c2c186479eb48e34e838c64/psycopg-3.3.4-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a"
+
+[[packages]]
+name = "psycopg-binary"
+version = "3.3.4"
+
+[[packages.wheels]]
+name = "psycopg_binary-3.3.4-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/eb/e6/5fff07a70d1f945ed90ae131c3bd76cab32beff7c58c6db15ad5820b6d1f/psycopg_binary-3.3.4-cp314-cp314-win_amd64.whl"
+
+[packages.wheels.hashes]
+sha256 = "c37e024c07308cd06cf3ec51bfd0e7f6157585a4d84d1bce4a7f5f7913719bf8"
+
+[[packages]]
+name = "pycparser"
+version = "3.0"
+
+[[packages.wheels]]
+name = "pycparser-3.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+
+[[packages]]
+name = "python-dotenv"
+version = "1.2.3"
+
+[[packages.wheels]]
+name = "python_dotenv-1.2.3-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/0d/17/c5c6b53ddc18f297992099b3d9ec16c855c0ccc83263a21fe4d1c625ec6c/python_dotenv-1.2.3-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9"
+
+[[packages]]
+name = "requests"
+version = "2.34.2"
+
+[[packages.wheels]]
+name = "requests-2.34.2-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0"
+
+[[packages]]
+name = "sqlparse"
+version = "0.6.0"
+
+[[packages.wheels]]
+name = "sqlparse-0.6.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/d9/50/f00935da0ec7cbf325f8dc4f772ae46fbc7b672dd62876e73f0a94adda57/sqlparse-0.6.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "b861c0288ce2fa56209a9a6412d2e066ac664b3873b89c26c9d8415e8e32996f"
+
+[[packages]]
+name = "typing-extensions"
+version = "4.16.0"
+
+[[packages.wheels]]
+name = "typing_extensions-4.16.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+
+[[packages]]
+name = "tzdata"
+version = "2026.3"
+
+[[packages.wheels]]
+name = "tzdata-2026.3-py2.py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/e5/6d/b53b99a9f2766d095985947a5782f1702cabb129a34f7a802d7197af832f/tzdata-2026.3-py2.py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931"
+
+[[packages]]
+name = "urllib3"
+version = "2.7.0"
+
+[[packages.wheels]]
+name = "urllib3-2.7.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897"
+
+[[packages]]
+name = "whitenoise"
+version = "6.12.0"
+
+[[packages.wheels]]
+name = "whitenoise-6.12.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/db/eb/d5583a11486211f3ebd4b385545ae787f32363d453c19fffd81106c9c138/whitenoise-6.12.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "fc5e8c572e33ebf24795b47b6a7da8da3c00cff2349f5b04c02f28d0cc5a3cc2"
+
+[[packages]]
+name = "zope-event"
+version = "6.2"
+
+[[packages.wheels]]
+name = "zope_event-6.2-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/9e/33/848922889e946d4befc415c219fe516af75c49555d8e736e183bfd30db42/zope_event-6.2-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "5e755153ac4faf64c10a4b6dd3307680166a3edf65b38df22df592610f8fa874"
+
+[[packages]]
+name = "zope-interface"
+version = "8.6"
+
+[[packages.wheels]]
+name = "zope_interface-8.6-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/26/56/0725e960cf581399b7f4136d5951f7d87bc659492e49db1794334f6c5153/zope_interface-8.6-cp314-cp314-win_amd64.whl"
+
+[packages.wheels.hashes]
+sha256 = "5ef166337880b0e78138bbd32fcbc5ab1da3337febe8d2a247f3690bcae3ede5"

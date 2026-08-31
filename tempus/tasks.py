@@ -17,15 +17,74 @@ inline).
 import logging
 import calendar
 import datetime
+from functools import partial
 from datetime import timedelta
 
 from accounts.models import Notification
+from django.db import transaction
 from django.utils import timezone
 from django_tasks import task
 
 from tempus.services import artdatabanken, phenogram, route_planner
 
 logger = logging.getLogger(__name__)
+
+
+def enqueue_phenogram_generation(species_pk, geo_area_pk=None, *, years=None, refresh=True):
+    """Queue at most one pending or running build for one (species, area).
+
+    The durable ``PhenogramGeneration`` row is protected by a database unique
+    constraint, so concurrent web processes cannot enqueue duplicate crawls.
+    """
+    from tempus.models import GeoArea, PhenogramGeneration, Species
+
+    years = years or phenogram.DEFAULT_YEARS
+    species = Species.objects.filter(pk=species_pk).first()
+    if species is None:
+        return None, False
+    geo_area = (
+        GeoArea.objects.filter(pk=geo_area_pk).first()
+        if geo_area_pk is not None
+        else None
+    )
+    if geo_area_pk is not None and geo_area is None:
+        return None, False
+
+    lookup = {"species": species, "geo_area": geo_area}
+    with transaction.atomic():
+        generation = PhenogramGeneration.objects.select_for_update().filter(
+            **lookup
+        ).first()
+        created = False
+        if generation is None:
+            generation, created = PhenogramGeneration.objects.get_or_create(
+                **lookup, defaults={"years": years}
+            )
+            if not created:
+                generation = PhenogramGeneration.objects.select_for_update().get(
+                    **lookup
+                )
+
+        if not created and generation.status in {
+            PhenogramGeneration.Status.PENDING,
+            PhenogramGeneration.Status.RUNNING,
+        }:
+            return generation, False
+
+        generation.status = PhenogramGeneration.Status.PENDING
+        generation.years = years
+        generation.error = ""
+        generation.save(update_fields=["status", "years", "error", "updated_at"])
+        transaction.on_commit(
+            partial(
+                generate_phenogram.enqueue,
+                str(species.pk),
+                str(geo_area.pk) if geo_area is not None else None,
+                years=years,
+                refresh=refresh,
+            )
+        )
+    return generation, True
 
 
 @task()
@@ -117,7 +176,7 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
     Artdatabanken failures so a worker does not spin on them; anything else
     propagates and django-tasks records the failure.
     """
-    from tempus.models import GeoArea, Species
+    from tempus.models import GeoArea, PhenogramGeneration, Species
 
     species = Species.objects.filter(pk=species_pk).first()
     if species is None:
@@ -130,9 +189,22 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
     if geo_area_pk is not None and geo_area is None:
         return
 
-    kwargs = {"refresh": refresh}
-    if years is not None:
-        kwargs["years"] = years
+    years = years or phenogram.DEFAULT_YEARS
+    generation = PhenogramGeneration.objects.filter(
+        species=species, geo_area=geo_area,
+    ).first()
+    if generation is not None:
+        with transaction.atomic():
+            generation = PhenogramGeneration.objects.select_for_update().get(
+                pk=generation.pk
+            )
+            if generation.status == PhenogramGeneration.Status.RUNNING:
+                return
+            generation.status = PhenogramGeneration.Status.RUNNING
+            generation.error = ""
+            generation.save(update_fields=["status", "error", "updated_at"])
+
+    kwargs = {"refresh": refresh, "years": years}
     try:
         phenogram.get_phenogram(species, geo_area, **kwargs)
     except (
@@ -143,6 +215,22 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
             "generate_phenogram(species=%s, geo_area=%s) skipped: %s",
             species_pk, geo_area_pk, exc,
         )
+        if generation is not None:
+            generation.status = PhenogramGeneration.Status.FAILED
+            generation.error = str(exc)
+            generation.save(update_fields=["status", "error", "updated_at"])
+        return
+    except Exception as exc:
+        if generation is not None:
+            generation.status = PhenogramGeneration.Status.FAILED
+            generation.error = str(exc)
+            generation.save(update_fields=["status", "error", "updated_at"])
+        raise
+
+    if generation is not None:
+        generation.status = PhenogramGeneration.Status.SUCCEEDED
+        generation.error = ""
+        generation.save(update_fields=["status", "error", "updated_at"])
 
 
 @task()
@@ -153,11 +241,15 @@ def fan_out_species_phenograms(species_pk, *, refresh=True):
     if not Species.objects.filter(pk=species_pk).exists():
         return
     area_pks = [str(pk) for pk in GeoArea.objects.values_list("pk", flat=True)]
+    queued = 0
     for area_pk in area_pks:
-        generate_phenogram.enqueue(species_pk, area_pk, refresh=refresh)
+        _, created = enqueue_phenogram_generation(
+            species_pk, area_pk, refresh=refresh,
+        )
+        queued += int(created)
     logger.info(
-        "fan_out_species_phenograms(%s): enqueued %d area(s)",
-        species_pk, len(area_pks),
+        "fan_out_species_phenograms(%s): enqueued %d of %d area(s)",
+        species_pk, queued, len(area_pks),
     )
 
 
@@ -169,11 +261,15 @@ def fan_out_area_phenograms(geo_area_pk, *, refresh=True):
     if not GeoArea.objects.filter(pk=geo_area_pk).exists():
         return
     species_pks = [str(pk) for pk in Species.objects.values_list("pk", flat=True)]
+    queued = 0
     for species_pk in species_pks:
-        generate_phenogram.enqueue(species_pk, str(geo_area_pk), refresh=refresh)
+        _, created = enqueue_phenogram_generation(
+            species_pk, str(geo_area_pk), refresh=refresh,
+        )
+        queued += int(created)
     logger.info(
-        "fan_out_area_phenograms(%s): enqueued %d species",
-        geo_area_pk, len(species_pks),
+        "fan_out_area_phenograms(%s): enqueued %d of %d species",
+        geo_area_pk, queued, len(species_pks),
     )
 
 

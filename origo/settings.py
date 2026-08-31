@@ -11,9 +11,10 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
-import re
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote, urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,14 +33,12 @@ else:
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-h($p9)mrt^)&@r(3$6%ek5^pp11-3!)_(!36llfkk4g+=5%h_#',
-)
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+# Debugging and secrets must always be configured explicitly. Failing fast is
+# safer than accidentally starting a production process with a known key.
+DEBUG = os.environ.get('DEBUG', 'False').strip().lower() == 'true'
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('SECRET_KEY must be set.')
 
 # ---------------------------------------------------------------------------
 # Domains
@@ -125,6 +124,18 @@ INSTALLED_APPS = [
 ]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31_536_000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -303,45 +314,36 @@ CSRF_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
 # CORS
 # https://github.com/adamchainz/django-cors-headers
 # Allows the separately-hosted Next.js frontends to call this API with
-# credentials (the session cookie) attached. Derived from DOMAINS; set the
-# CORS_ALLOWED_ORIGINS env var to override completely.
+# credentials (the session cookie) attached. Every origin must be explicitly
+# named: a wildcard would allow any controlled or accidentally taken-over
+# subdomain to make authenticated cross-origin requests.
 
-if os.environ.get('CORS_ALLOWED_ORIGINS'):
-    CORS_ALLOWED_ORIGINS = [
-        o.strip() for o in os.environ['CORS_ALLOWED_ORIGINS'].split(',') if o.strip()
+def _explicit_origins(name):
+    origins = [
+        origin.strip()
+        for origin in os.environ.get(name, '').split(',')
+        if origin.strip()
     ]
-else:
-    CORS_ALLOWED_ORIGINS = _frontend_origins(schemes=('https',))
+    if any('*' in origin for origin in origins):
+        raise ImproperlyConfigured(f'{name} must not contain wildcard origins.')
+    return origins
 
-    # Frontends are separated by subdomain. Trust any frontend subdomain below
-    # a configured root domain so a new app does not also require a settings
-    # change. DNS for these domains must therefore remain under our control.
-    CORS_ALLOWED_ORIGIN_REGEXES = [
-        rf'^https://[a-z0-9-]+\.{re.escape(domain)}$'
-        for domain in DOMAINS
-    ] + [
-        rf'^https?://[a-z0-9-]+\.{re.escape(domain)}:{re.escape(port)}$'
-        for domain in DOMAINS
-        for port in FRONTEND_DEV_PORTS
-    ]
+
+DEFAULT_FRONTEND_ORIGINS = _frontend_origins(schemes=('https',))
+if DEBUG:
+    DEFAULT_FRONTEND_ORIGINS += _frontend_origins(
+        schemes=('http', 'https'), ports=FRONTEND_DEV_PORTS,
+    )
+
+CORS_ALLOWED_ORIGINS = (
+    _explicit_origins('CORS_ALLOWED_ORIGINS') or DEFAULT_FRONTEND_ORIGINS
+)
 
 CORS_ALLOW_CREDENTIALS = True
 
-if os.environ.get('CSRF_TRUSTED_ORIGINS'):
-    CSRF_TRUSTED_ORIGINS = [
-        o.strip() for o in os.environ['CSRF_TRUSTED_ORIGINS'].split(',') if o.strip()
-    ]
-else:
-    CSRF_TRUSTED_ORIGINS = (
-        [f'https://{API_SUBDOMAIN}.{domain}' for domain in DOMAINS]
-        + [f'https://*.{domain}' for domain in DOMAINS]
-        + [
-            f'{scheme}://*.{domain}:{port}'
-            for domain in DOMAINS
-            for scheme in ('http', 'https')
-            for port in FRONTEND_DEV_PORTS
-        ]
-    )
+CSRF_TRUSTED_ORIGINS = (
+    _explicit_origins('CSRF_TRUSTED_ORIGINS') or CORS_ALLOWED_ORIGINS
+)
 
 
 # ---------------------------------------------------------------------------

@@ -300,6 +300,53 @@ class Phenogram(models.Model):
         return f"{self.species} phenogram – {where}"
 
 
+class PhenogramGeneration(models.Model):
+    """The durable queue lock for one species and geographic area."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    species = models.ForeignKey(
+        Species, on_delete=models.CASCADE, related_name="phenogram_generations"
+    )
+    geo_area = models.ForeignKey(
+        GeoArea,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="phenogram_generations",
+    )
+    years = models.PositiveSmallIntegerField(default=8)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("species", "geo_area"),
+                condition=models.Q(geo_area__isnull=False),
+                name="tempus_unique_phenogram_generation_area",
+            ),
+            models.UniqueConstraint(
+                fields=("species",),
+                condition=models.Q(geo_area__isnull=True),
+                name="tempus_unique_phenogram_generation_range",
+            ),
+        ]
+
+    def __str__(self):
+        where = self.geo_area if self.geo_area_id else "whole range"
+        return f"{self.species} generation – {where} ({self.status})"
+
+
 class Route(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tempus_routes")

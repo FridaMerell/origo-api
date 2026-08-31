@@ -1,6 +1,14 @@
+from django.db import models
 from rest_framework import serializers
 
-from flux.models import Milestone, Project, Task, Update
+from flux.models import Document, Milestone, Project, Tag, Task, Update
+
+
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = ['id', 'name', 'color', 'created_by', 'created_at']
+        read_only_fields = ['created_by', 'created_at']
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -14,8 +22,26 @@ class ProjectSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'files',
+            'tags',
         ]
         read_only_fields = ['created_at', 'updated_at']
+
+    def validate_tags(self, tags):
+        request = self.context['request']
+        if self.instance is None:
+            disallowed = [tag for tag in tags if tag.created_by_id != request.user.pk]
+        else:
+            disallowed = [
+                tag for tag in tags
+                if tag.created_by_id != request.user.pk
+                and not self.instance.tags.filter(pk=tag.pk).exists()
+                and not tag.milestones.filter(project=self.instance).exists()
+            ]
+        if disallowed:
+            raise serializers.ValidationError(
+                'Tags must be created by you before they can be added to a project.'
+            )
+        return tags
 
 
 class MilestoneSerializer(serializers.ModelSerializer):
@@ -32,6 +58,7 @@ class MilestoneSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'files',
+            'tags',
             'update_count'
         ]
         read_only_fields = ['created_at', 'updated_at']
@@ -41,6 +68,66 @@ class MilestoneSerializer(serializers.ModelSerializer):
         if not project.members.filter(pk=request.user.pk).exists():
             raise serializers.ValidationError("You must be a member of this project.")
         return project
+
+    def validate_tags(self, tags):
+        project = self.initial_data.get('project')
+        if self.instance is not None:
+            project = self.instance.project
+        else:
+            try:
+                project = Project.objects.get(pk=project)
+            except (Project.DoesNotExist, TypeError, ValueError) as exc:
+                raise serializers.ValidationError('A valid project is required.') from exc
+
+        request = self.context['request']
+        allowed_ids = Tag.objects.filter(
+            models.Q(created_by=request.user)
+            | models.Q(projects=project)
+            | models.Q(milestones__project=project)
+        ).values_list('pk', flat=True)
+        if any(tag.pk not in allowed_ids for tag in tags):
+            raise serializers.ValidationError(
+                'Tags must be available in this project or created by you.'
+            )
+        return tags
+
+
+class DocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Document
+        fields = [
+            'id',
+            'project',
+            'milestone',
+            'task',
+            'title',
+            'kind',
+            'content',
+            'author',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['author', 'created_at', 'updated_at']
+
+    def validate_project(self, project):
+        request = self.context['request']
+        if not project.members.filter(pk=request.user.pk).exists():
+            raise serializers.ValidationError('You must be a member of this project.')
+        return project
+
+    def validate(self, attrs):
+        project = attrs.get('project') or getattr(self.instance, 'project', None)
+        milestone = attrs.get('milestone', getattr(self.instance, 'milestone', None))
+        task = attrs.get('task', getattr(self.instance, 'task', None))
+        if milestone is not None and milestone.project_id != project.pk:
+            raise serializers.ValidationError(
+                {'milestone': 'Milestone must belong to the same project.'}
+            )
+        if task is not None and task.project_id != project.pk:
+            raise serializers.ValidationError(
+                {'task': 'Task must belong to the same project.'}
+            )
+        return attrs
 
 
 class TaskSerializer(serializers.ModelSerializer):

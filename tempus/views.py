@@ -345,7 +345,7 @@ class SpeciesViewSet(SharedDataViewSet):
         if row is not None and not refresh:
             return Response(PhenogramSerializer(row).data)
 
-        tasks.generate_phenogram.enqueue(
+        _generation, queued = tasks.enqueue_phenogram_generation(
             str(species.pk),
             str(geo_area.pk) if geo_area is not None else None,
             refresh=True,
@@ -353,7 +353,11 @@ class SpeciesViewSet(SharedDataViewSet):
         )
         return Response(
             {
-                "detail": "Phenogram build queued.",
+                "detail": (
+                    "Phenogram build queued."
+                    if queued
+                    else "A phenogram build is already queued or running."
+                ),
                 "phenogram": PhenogramSerializer(row).data if row is not None else None,
             },
             status=status.HTTP_202_ACCEPTED,

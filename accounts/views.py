@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model, login, logout
+from django.db.models import Q
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -50,10 +51,16 @@ class MeView(APIView):
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['id', 'username', 'email']
+
+    def get_queryset(self):
+        """Users who share a Flux project or Verso house with the requester."""
+        return User.objects.filter(
+            Q(projects__members=self.request.user)
+            | Q(houses__members=self.request.user)
+        ).exclude(pk=self.request.user.pk).distinct()
 
 class SelfViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
