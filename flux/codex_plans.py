@@ -5,7 +5,7 @@ from datetime import date
 from django.db import transaction
 from django.db.models import Count
 
-from flux.models import Milestone, Project, Task, Update
+from flux.models import Document, Milestone, Project, Task, Update
 
 
 class CodexPlanError(ValueError):
@@ -115,6 +115,19 @@ def serialize_project(project):
             }
             for item in project.updates.select_related('milestone', 'task').order_by('id')
         ],
+        'documents': [
+            {
+                'id': item.id,
+                'title': item.title,
+                'kind': item.kind,
+                'content': item.content,
+                'milestone_id': item.milestone_id,
+                'task_id': item.task_id,
+                'created_at': item.created_at.isoformat(),
+                'updated_at': item.updated_at.isoformat(),
+            }
+            for item in project.documents.select_related('milestone', 'task').order_by('id')
+        ],
     }
 
 
@@ -124,6 +137,7 @@ def import_project_plan_for_user(user, plan):
     milestone_payloads = _items(plan, 'milestones')
     task_payloads = _items(plan, 'tasks')
     update_payloads = _items(plan, 'updates')
+    document_payloads = _items(plan, 'documents')
 
     with transaction.atomic():
         project = Project.objects.create(
@@ -182,6 +196,23 @@ def import_project_plan_for_user(user, plan):
                 task=tasks.get(task_ref),
                 author=user,
                 content=_text(item.get('content'), 'update.content', required=True, maximum=10000),
+            )
+
+        for item in document_payloads:
+            milestone_ref = item.get('milestone_ref')
+            task_ref = item.get('task_ref')
+            if milestone_ref is not None and milestone_ref not in milestones:
+                raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
+            if task_ref is not None and task_ref not in tasks:
+                raise CodexPlanError(f'Unknown task_ref: {task_ref}.')
+            Document.objects.create(
+                project=project,
+                milestone=milestones.get(milestone_ref),
+                task=tasks.get(task_ref),
+                title=_text(item.get('title'), 'document.title', required=True),
+                kind=_choice(item, 'kind', Document.Kind.values, Document.Kind.MARKDOWN),
+                content=_text(item.get('content'), 'document.content', maximum=100000),
+                author=user,
             )
     return serialize_project(project)
 
