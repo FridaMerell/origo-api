@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from accounts.authentication import CodexTokenAuthentication
 from flux.codex_plans import (
     CodexPlanError,
+    add_task_to_private_project,
     get_private_project_plan_for_user,
     import_project_plan_for_user,
     list_private_project_plans_for_user,
@@ -55,6 +56,20 @@ class CodexProjectPlanDetailView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
         return Response(project)
+
+
+class CodexProjectTaskCreateView(APIView):
+    """Create a task under an existing private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, project_id):
+        try:
+            task = add_task_to_private_project(request.user, project_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(task, status=status.HTTP_201_CREATED)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):

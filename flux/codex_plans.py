@@ -62,6 +62,14 @@ def _ref(item, field):
     return _text(item.get(field), field, required=True, maximum=100)
 
 
+def _optional_id(value, field):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CodexPlanError(f'{field} must be a positive integer or null.')
+    return value
+
+
 def _validate_parent_refs(parent_refs):
     for ref in parent_refs:
         seen = set()
@@ -230,3 +238,51 @@ def get_private_project_plan_for_user(user, project_id):
     except Project.DoesNotExist as exc:
         raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
     return serialize_project(project)
+
+
+def add_task_to_private_project(user, project_id, task_data):
+    """Create one task in an existing private project owned by the user."""
+    if not isinstance(task_data, dict):
+        raise CodexPlanError('task must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+
+    milestone_id = _optional_id(task_data.get('milestone_id'), 'milestone_id')
+    parent_id = _optional_id(task_data.get('parent_id'), 'parent_id')
+    milestone = None
+    parent = None
+    if milestone_id is not None:
+        try:
+            milestone = Milestone.objects.get(pk=milestone_id, project=project)
+        except Milestone.DoesNotExist as exc:
+            raise CodexPlanError('milestone_id must belong to this project.') from exc
+    if parent_id is not None:
+        try:
+            parent = Task.objects.get(pk=parent_id, project=project)
+        except Task.DoesNotExist as exc:
+            raise CodexPlanError('parent_id must belong to this project.') from exc
+
+    task = Task.objects.create(
+        project=project,
+        milestone=milestone,
+        parent=parent,
+        title=_text(task_data.get('title'), 'task.title', required=True),
+        description=_text(task_data.get('description'), 'task.description', maximum=10000),
+        due_date=_date(task_data.get('due_date'), 'task.due_date'),
+        priority=_choice(task_data, 'priority', Task.Priority.values, Task.Priority.MEDIUM),
+        status=_choice(task_data, 'status', Task.Status.values, Task.Status.NOT_STARTED),
+    )
+    return {
+        'id': task.id,
+        'project_id': project.id,
+        'title': task.title,
+        'description': task.description,
+        'milestone_id': task.milestone_id,
+        'parent_id': task.parent_id,
+        'due_date': task.due_date.isoformat() if task.due_date else None,
+        'priority': task.priority,
+        'status': task.status,
+        'created_at': task.created_at.isoformat(),
+    }
