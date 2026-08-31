@@ -18,7 +18,7 @@ from django_filters.rest_framework import (
     NumberFilter,
 )
 from rest_framework import filters, permissions, status, viewsets
-from rest_framework.authentication import TokenAuthentication
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.renderers import BaseRenderer
@@ -650,6 +650,7 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
 
 class ObservationViewSet(viewsets.ModelViewSet):
     serializer_class = ObservationSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["species", "checklist_items"]
 

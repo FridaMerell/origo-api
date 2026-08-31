@@ -1,0 +1,7 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p>Copy this token now. It will not be shown again.</p>
+<p><input type="text" value="{{ plaintext_token }}" readonly size="60"></p>
+<p><a href="{% url 'admin:accounts_codextoken_changelist' %}">Back to Codex tokens</a></p>
+{% endblock %}

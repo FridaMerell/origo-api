@@ -39,6 +39,22 @@ def validate_geojson(value, expected_type):
     return value
 
 
+class SpeciesReferenceField(serializers.PrimaryKeyRelatedField):
+    """Accept a Tempus species UUID or a Dyntaxa taxon id.
+
+    Representation deliberately remains the internal UUID for compatibility
+    with existing frontend clients.
+    """
+
+    def to_internal_value(self, data):
+        if isinstance(data, int) or (isinstance(data, str) and data.isdigit()):
+            try:
+                return self.get_queryset().get(dyntaxa_taxon_id=int(data))
+            except Species.DoesNotExist:
+                self.fail("does_not_exist", pk_value=data)
+        return super().to_internal_value(data)
+
+
 class SpeciesSerializer(serializers.ModelSerializer):
     # Annotated per-request by SpeciesViewSet.get_queryset; False on writes.
     is_followed = serializers.BooleanField(read_only=True, default=False)
@@ -714,6 +730,9 @@ class ChecklistRegisterItemSerializer(serializers.ModelSerializer):
 
 class ObservationSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+    species = SpeciesReferenceField(
+        queryset=Species.objects.all(),
+    )
     checklist_items = serializers.PrimaryKeyRelatedField(
         many=True,
         queryset=ChecklistItem.objects.all(),
