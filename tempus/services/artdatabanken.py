@@ -32,7 +32,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
-from tempus.models import Species, SpeciesCategory
+from tempus.models import Species, SpeciesCategory, SpeciesCategoryMembership
 
 logger = logging.getLogger(__name__)
 
@@ -715,7 +715,10 @@ def register_species(
     ``category.species`` (idempotent).
     """
     species = upsert_species(dyntaxa_taxon_id)
-    category.species.add(species)  # idempotent
+    SpeciesCategoryMembership.objects.update_or_create(
+        category=category,
+        species=species,
+    )
     return species
 
 

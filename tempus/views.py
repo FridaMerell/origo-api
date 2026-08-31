@@ -3,10 +3,11 @@ import logging
 import time
 import uuid
 from datetime import timedelta
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 from django.db import close_old_connections, connection
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -26,7 +27,13 @@ from rest_framework.views import APIView
 
 from origo.pagination import StandardPagination
 from tempus import tasks
-from tempus.services import artdatabanken, phenogram, route_planner, season
+from tempus.services import (
+    artdatabanken,
+    checklists,
+    phenogram,
+    route_planner,
+    season,
+)
 
 from tempus.models import (
     BIRDNET_DETECTION_CHANNEL,
@@ -48,6 +55,7 @@ from tempus.models import (
 )
 from tempus.serializers import (
     BirdnetDeviceSerializer,
+    ChecklistRegisterItemSerializer,
     ChecklistItemSerializer,
     ChecklistSerializer,
     GeoAreaSerializer,
@@ -126,7 +134,7 @@ class SpeciesViewSet(SharedDataViewSet):
         followed = SpeciesFollow.objects.filter(
             species=OuterRef("pk"), user=user
         )
-        return super().get_queryset().annotate(is_followed=Exists(followed))
+        return super().get_queryset().annotate(is_followed=Exists(followed)).distinct()
 
     @action(detail=False, methods=["get"], url_path="seasonal-overview")
     def seasonal_overview(self, request):
@@ -380,11 +388,22 @@ class SpeciesViewSet(SharedDataViewSet):
 
 
 class SpeciesCategoryViewSet(SharedDataViewSet):
-    queryset = SpeciesCategory.objects.prefetch_related("taxon").all()
+    queryset = SpeciesCategory.objects.prefetch_related(
+        "taxon",
+        "memberships__species",
+        "children",
+    ).all()
     serializer_class = SpeciesCategorySerializer
-    filterset_fields = ["taxon_id"]
-    ordering_fields = ["taxon_id", "label", "species_count"]
-    ordering = ["taxon_id", "label", "species_count"]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["taxon_id", "parent_category", "is_primary"]
+    ordering_fields = [
+        "taxon_id",
+        "label",
+        "parent_category",
+        "parent_category__label",
+        "is_primary",
+    ]
+    ordering = ["taxon_id", "label"]
     lookup_field = "taxon_id"
 
 
@@ -567,6 +586,23 @@ class RouteStopViewSet(viewsets.ModelViewSet):
         return RouteStop.objects.filter(route__user=self.request.user).select_related("route")
 
 
+class ChecklistRegisterPagination(StandardPagination):
+    max_page_size = 250
+
+    @staticmethod
+    def _relative_url(url):
+        if url is None:
+            return None
+        parts = urlsplit(url)
+        return urlunsplit(("", "", parts.path, parts.query, ""))
+
+    def get_next_link(self):
+        return self._relative_url(super().get_next_link())
+
+    def get_previous_link(self):
+        return self._relative_url(super().get_previous_link())
+
+
 class ChecklistViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -577,6 +613,30 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="register",
+        pagination_class=ChecklistRegisterPagination,
+    )
+    def register(self, request, pk=None):
+        checklist = self.get_object()
+        observations = Observation.objects.filter(
+            user=request.user,
+            checklist_items=OuterRef("pk"),
+        ).order_by("-observed_at", "-created_at", "-pk")
+        queryset = (
+            ChecklistItem.objects.filter(checklist=checklist)
+            .select_related("species")
+            .annotate(
+                is_observed=Exists(observations),
+                latest_observation_id=Subquery(observations.values("pk")[:1]),
+            )
+        )
+        page = self.paginate_queryset(queryset)
+        serializer = ChecklistRegisterItemSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class ChecklistItemViewSet(viewsets.ModelViewSet):
@@ -598,6 +658,18 @@ class ObservationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="sync-checklists")
+    def sync_checklists(self, request):
+        observations_linked, checklist_item_links_created = (
+            checklists.sync_observations_to_checklists(user=request.user)
+        )
+        return Response(
+            {
+                "observations_linked": observations_linked,
+                "checklist_item_links_created": checklist_item_links_created,
+            }
+        )
 
 
 class BirdnetDetectionIngestView(APIView):

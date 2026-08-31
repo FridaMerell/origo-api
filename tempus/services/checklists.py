@@ -50,6 +50,41 @@ def link_observation_to_checklists(observation: Observation) -> None:
         observation.checklist_items.add(*items)
 
 
+def sync_observations_to_checklists(*, user: AbstractBaseUser) -> tuple[int, int]:
+    """Link a user's existing observations to checklist items they satisfy.
+
+    Returns ``(observations_linked, checklist_item_links_created)``. Existing
+    links are retained and do not count towards either total.
+    """
+    observations_linked = 0
+    checklist_item_links_created = 0
+    for observation in Observation.objects.filter(user=user).iterator():
+        matches = matching_checklist_items(
+            user=user,
+            species_id=observation.species_id,
+            observed_at=observation.observed_at,
+        )
+        if not matches:
+            continue
+
+        existing_item_ids = set(
+            observation.checklist_items.filter(
+                pk__in=[item.pk for item in matches]
+            ).values_list("pk", flat=True)
+        )
+        missing_items = [
+            item for item in matches if item.pk not in existing_item_ids
+        ]
+        if not missing_items:
+            continue
+
+        observation.checklist_items.add(*missing_items)
+        observations_linked += 1
+        checklist_item_links_created += len(missing_items)
+
+    return observations_linked, checklist_item_links_created
+
+
 @transaction.atomic
 def record_checklist_sighting(
     *,

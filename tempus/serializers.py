@@ -19,6 +19,7 @@ from tempus.models import (
     Source,
     Species,
     SpeciesCategory,
+    SpeciesCategoryMembership,
     SpeciesFollow,
 )
 from tempus.services import phenogram, season
@@ -65,14 +66,59 @@ class SpeciesSerializer(serializers.ModelSerializer):
         ]
 
 
+class SpeciesCategoryMembershipSerializer(serializers.ModelSerializer):
+    species = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = SpeciesCategoryMembership
+        fields = ["id", "species"]
+        read_only_fields = ["id", "species"]
+
+
 class SpeciesCategorySerializer(serializers.ModelSerializer):
-    species = serializers.PrimaryKeyRelatedField(many=True, read_only=True, )
-    species_count = serializers.IntegerField(source="species.count", read_only=True)
+    parent_category = serializers.PrimaryKeyRelatedField(read_only=True)
+    is_primary = serializers.BooleanField(required=False)
+    species = serializers.SerializerMethodField()
+    species_memberships = SpeciesCategoryMembershipSerializer(
+        source="memberships",
+        many=True,
+        read_only=True,
+    )
+    species_count = serializers.SerializerMethodField()
 
     class Meta:
         model = SpeciesCategory
-        fields = ["id", "taxon", "label", "image_url", "species", "species_count", "taxon_id"]
-        read_only_fields = ["id", "species"]
+        fields = [
+            "id",
+            "parent_category",
+            "is_primary",
+            "taxon",
+            "label",
+            "image_url",
+            "species",
+            "species_memberships",
+            "species_count",
+            "taxon_id",
+        ]
+        read_only_fields = ["id", "species", "species_memberships", "species_count"]
+
+    def get_species_count(self, obj):
+        return len(obj.effective_species_ids())
+
+    def get_species(self, obj):
+        return [str(pk) for pk in obj.effective_species_ids()]
+
+    def validate_parent_category(self, parent_category):
+        if parent_category is None or self.instance is None:
+            return parent_category
+        ancestor = parent_category
+        while ancestor is not None:
+            if ancestor.pk == self.instance.pk:
+                raise serializers.ValidationError(
+                    "This would create a circular category chain."
+                )
+            ancestor = ancestor.parent_category
+        return parent_category
 
 
 class RegisterSpeciesSerializer(serializers.Serializer):
@@ -511,6 +557,21 @@ class RouteSuggestionRunSerializer(serializers.ModelSerializer):
 class ChecklistSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
     species_count = serializers.SerializerMethodField()
+    species = serializers.ListField(
+        child=serializers.UUIDField(), write_only=True, required=False, default=list
+    )
+    species_category_taxon_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        write_only=True,
+        required=False,
+        default=list,
+    )
+    species_category_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+        default=list,
+    )
 
     class Meta:
         model = Checklist
@@ -524,6 +585,9 @@ class ChecklistSerializer(serializers.ModelSerializer):
             "end_date",
             "geo_area",
             "route",
+            "species",
+            "species_category_ids",
+            "species_category_taxon_ids",
             "created_at",
             "updated_at",
         ]
@@ -532,20 +596,70 @@ class ChecklistSerializer(serializers.ModelSerializer):
     def get_species_count(self, obj):
         return obj.items.values("species").distinct().count()
 
-    def validate_route(self, route):
-        if route is not None and route.user_id != self.context["request"].user.pk:
-            raise serializers.ValidationError("The route does not belong to you.")
-        return route
-
     def validate(self, attrs):
+        attrs = super().validate(attrs)
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         end = attrs.get("end_date", getattr(self.instance, "end_date", None))
         if start and end and end < start:
             raise serializers.ValidationError(
                 {"end_date": "The end date cannot be before the start date."}
             )
+        species_ids = set(attrs.get("species", []))
+        category_ids = set(attrs.get("species_category_ids", []))
+        category_taxon_ids = set(attrs.get("species_category_taxon_ids", []))
+        if not species_ids and not category_ids and not category_taxon_ids:
+            raise serializers.ValidationError(
+                {"species": "Provide at least one species or species category."}
+            )
+
+        existing_species = set(
+            Species.objects.filter(pk__in=species_ids).values_list("pk", flat=True)
+        )
+        if existing_species != species_ids:
+            raise serializers.ValidationError({"species": "One or more species do not exist."})
+
+        categories = list(SpeciesCategory.objects.filter(pk__in=category_ids))
+        if len(categories) != len(category_ids):
+            raise serializers.ValidationError(
+                {"species_category_ids": "One or more categories do not exist."}
+            )
+        taxon_categories = list(
+            SpeciesCategory.objects.filter(taxon_id__in=category_taxon_ids)
+        )
+        if len(taxon_categories) != len(category_taxon_ids):
+            raise serializers.ValidationError(
+                {"species_category_taxon_ids": "One or more categories do not exist."}
+            )
+        categories.extend(taxon_categories)
+        attrs["_category_species_ids"] = {
+            species_id
+            for category in categories
+            for species_id in category.effective_species_ids()
+        }
         return attrs
 
+    def create(self, validated_data):
+        species_ids = set(validated_data.pop("species", []))
+        category_species_ids = validated_data.pop("_category_species_ids", set())
+        validated_data.pop("species_category_ids", None)
+        validated_data.pop("species_category_taxon_ids", None)
+        checklist = super().create(validated_data)
+        all_species_ids = species_ids | category_species_ids
+        ChecklistItem.objects.bulk_create([
+            ChecklistItem(
+                checklist=checklist,
+                species_id=species_id,
+                sequence=sequence,
+                notes="",
+            )
+            for sequence, species_id in enumerate(sorted(all_species_ids), start=1)
+        ])
+        return checklist
+
+    def validate_route(self, route):
+        if route is not None and route.user_id != self.context["request"].user.pk:
+            raise serializers.ValidationError("The route does not belong to you.")
+        return route
 
 class ChecklistItemSerializer(serializers.ModelSerializer):
     is_completed = serializers.SerializerMethodField()
@@ -569,6 +683,33 @@ class ChecklistItemSerializer(serializers.ModelSerializer):
 
     def get_is_completed(self, obj):
         return obj.observations.exists()
+
+
+class ChecklistRegisterItemSerializer(serializers.ModelSerializer):
+    species_id = serializers.UUIDField(read_only=True)
+    swedish_name = serializers.CharField(source="species.swedish_name", read_only=True)
+    scientific_name = serializers.CharField(
+        source="species.scientific_name", read_only=True
+    )
+    dyntaxa_taxon_id = serializers.IntegerField(
+        source="species.dyntaxa_taxon_id", read_only=True
+    )
+    is_observed = serializers.BooleanField(read_only=True)
+    latest_observation_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = ChecklistItem
+        fields = [
+            "id",
+            "sequence",
+            "notes",
+            "species_id",
+            "swedish_name",
+            "scientific_name",
+            "dyntaxa_taxon_id",
+            "is_observed",
+            "latest_observation_id",
+        ]
 
 
 class ObservationSerializer(serializers.ModelSerializer):

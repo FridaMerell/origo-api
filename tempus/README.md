@@ -164,6 +164,13 @@ It is exposed two ways:
 - `GET phenograms/?status=<name>` lists the phenograms currently in a given
   state — `?status=going_out_of_season&geo_area=<id>` answers "what is my last
   chance to see on Öland". `status` also accepts `species=` and `years=`.
+- `notify_followed_species_season_start` creates an in-app Tempus notification
+  every Sunday for followed species whose phenogram season starts 7-14 days
+  later. All matching species for one user are grouped into one digest, and a
+  species is not repeated in another digest within the following 14 days.
+  Enqueue it once from the Django task/operations setup; it schedules its next
+  weekly run itself. Notifications are read through
+  `/api/accounts/notifications/`.
 
 `Species` mirrors this with `seasonal_status(geo_area=None)`, `is_in_season()`,
 `is_coming_into_season()` and `is_going_out_of_season()`, each reading the

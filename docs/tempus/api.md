@@ -36,6 +36,11 @@ Species actions:
 |---|---|
 | `phenograms/` | Read-only; `species`, `geo_area`, `years`, `status` |
 
+Notifications are available at `/api/accounts/notifications/`. They are
+read-only for the current user and support `domain`, `is_read`, and `unread`
+filtering. The Tempus season notification is delivered as one combined weekly
+digest when followed species start their season 7-14 days later.
+
 ## User-owned resources
 
 | Path | Operations and filters |
@@ -78,4 +83,3 @@ See [BirdNET API](birdnet/api.md).
 
 This page is an index, not a replacement for serializer-specific contracts.
 Feature pages document the important payloads and state transitions.
-

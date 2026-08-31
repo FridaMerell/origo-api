@@ -15,8 +15,11 @@ inline).
 """
 
 import logging
+import calendar
+import datetime
 from datetime import timedelta
 
+from accounts.models import Notification
 from django.utils import timezone
 from django_tasks import task
 
@@ -172,6 +175,107 @@ def fan_out_area_phenograms(geo_area_pk, *, refresh=True):
         "fan_out_area_phenograms(%s): enqueued %d species",
         geo_area_pk, len(species_pks),
     )
+
+
+def _day_of_year_to_date(day_of_year, year):
+    """Map a phenogram day-of-year onto ``year`` safely around leap years."""
+    last_day = 366 if calendar.isleap(year) else 365
+    day_of_year = min(max(int(day_of_year), 1), last_day)
+    return datetime.date(year, 1, 1) + timedelta(days=day_of_year - 1)
+
+
+def _next_season_start_date(day_of_year, today):
+    """Return the next calendar occurrence of a phenogram day-of-year."""
+    candidate = _day_of_year_to_date(day_of_year, today.year)
+    if candidate < today:
+        candidate = _day_of_year_to_date(day_of_year, today.year + 1)
+    return candidate
+
+
+@task()
+def notify_followed_species_season_start():
+    """Notify followers on Sunday about species entering season in 7-14 days."""
+    from tempus.models import Phenogram, SpeciesFollow
+
+    today = timezone.localdate()
+    if today.weekday() != 6:
+        days_until_sunday = (6 - today.weekday()) % 7 or 7
+        notify_followed_species_season_start.using(
+            run_after=timedelta(days=days_until_sunday)
+        ).enqueue()
+        return {"created": 0, "skipped": "not_sunday"}
+
+    follow_qs = SpeciesFollow.objects.filter(
+        notifications_enabled=True,
+    ).select_related("user", "species")
+    species_ids = list(follow_qs.values_list("species_id", flat=True))
+    phenograms = (
+        Phenogram.objects.filter(
+            species_id__in=species_ids,
+            geo_area__isnull=True,
+        )
+        .order_by("species_id", "-years")
+    )
+    latest_by_species = {}
+    for row in phenograms:
+        latest_by_species.setdefault(row.species_id, row)
+
+    candidates_by_user = {}
+    for follow in follow_qs:
+        row = latest_by_species.get(follow.species_id)
+        if row is None or row.start_day_of_year is None:
+            continue
+        season_start = _next_season_start_date(row.start_day_of_year, today)
+        days_until_start = (season_start - today).days
+        if not 7 <= days_until_start <= 14:
+            continue
+
+        candidates_by_user.setdefault(follow.user, []).append(str(follow.species))
+
+    created = 0
+    prefix = "Fåglar som börjar komma i säsong inom 7-14 dagar enligt phenogrammet:"
+    for user, species_names in candidates_by_user.items():
+        recent_messages = Notification.objects.filter(
+            user=user,
+            domain="tempus",
+            message__startswith=prefix,
+            created_at__date__range=(today - timedelta(days=14), today),
+        ).values_list("message", flat=True)
+        previously_notified = {
+            line[2:]
+            for previous_message in recent_messages
+            for line in previous_message.splitlines()
+            if line.startswith("- ")
+        }
+        species_names = [
+            name for name in species_names if name not in previously_notified
+        ]
+        if not species_names:
+            continue
+
+        message = prefix + "\n" + "\n".join(
+            f"- {species_name}" for species_name in sorted(species_names)
+        )
+        already_sent = Notification.objects.filter(
+            user=user,
+            domain="tempus",
+            message__startswith=prefix,
+            created_at__date=today,
+        ).exists()
+        if not already_sent:
+            Notification.objects.create(
+                user=user,
+                domain="tempus",
+                message=message,
+            )
+            created += 1
+
+    logger.info(
+        "notify_followed_species_season_start: created %d notification(s)",
+        created,
+    )
+    notify_followed_species_season_start.using(run_after=timedelta(days=7)).enqueue()
+    return {"created": created}
 
 
 @task()

@@ -80,6 +80,14 @@ class Species(models.Model):
 
 class SpeciesCategory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    parent_category = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
+    is_primary = models.BooleanField(default=False)
     taxon = models.ManyToManyField(
         Species,
         related_name="species_category",
@@ -92,6 +100,8 @@ class SpeciesCategory(models.Model):
         Species,
         related_name="categories",
         blank=True,
+        through="SpeciesCategoryMembership",
+        through_fields=("category", "species"),
     )
 
     class Meta:
@@ -100,6 +110,57 @@ class SpeciesCategory(models.Model):
 
     def __str__(self):
         return self.label or str(self.taxon_id)
+
+    def descendant_categories(self, *, include_self=False):
+        """Return this category's descendants, optionally including itself."""
+        descendants = []
+        stack = [self] if include_self else list(self.children.all())
+        seen = set()
+        while stack:
+            category = stack.pop()
+            if category.pk in seen:
+                continue
+            seen.add(category.pk)
+            descendants.append(category)
+            stack.extend(list(category.children.all()))
+        return descendants
+
+    def effective_species_queryset(self):
+        """Species assigned here or to any descendant category."""
+        category_ids = [category.pk for category in self.descendant_categories(include_self=True)]
+        return (
+            Species.objects.filter(category_memberships__category_id__in=category_ids)
+            .distinct()
+            .order_by("scientific_name")
+        )
+
+    def effective_species_ids(self):
+        return list(self.effective_species_queryset().values_list("pk", flat=True))
+
+
+class SpeciesCategoryMembership(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    category = models.ForeignKey(
+        SpeciesCategory,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+    )
+    species = models.ForeignKey(
+        Species,
+        on_delete=models.CASCADE,
+        related_name="category_memberships",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("category", "species"),
+                name="tempus_unique_species_category_membership",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.category} - {self.species}"
 
 
 class SpeciesFollow(models.Model):

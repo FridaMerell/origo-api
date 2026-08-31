@@ -10,6 +10,7 @@ class Notification(models.Model):
     DOMAIN_CHOICES = [
         ("verso", "Verso"),
         ("flux", "Flux"),
+        ("tempus", "Tempus"),
     ]
 
     user = models.ForeignKey(
