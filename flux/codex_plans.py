@@ -139,7 +139,7 @@ def serialize_project(project):
     }
 
 
-def import_project_plan_for_user(user, plan):
+def _append_plan_to_project(project, user, plan):
     if not isinstance(plan, dict):
         raise CodexPlanError('plan must be an object.')
     milestone_payloads = _items(plan, 'milestones')
@@ -147,81 +147,86 @@ def import_project_plan_for_user(user, plan):
     update_payloads = _items(plan, 'updates')
     document_payloads = _items(plan, 'documents')
 
+    milestones = {}
+    for item in milestone_payloads:
+        ref = _ref(item, 'ref')
+        if ref in milestones:
+            raise CodexPlanError(f'Duplicate milestone ref: {ref}.')
+        milestones[ref] = Milestone.objects.create(
+            project=project,
+            title=_text(item.get('title'), 'milestone.title', required=True),
+            description=_text(item.get('description'), 'milestone.description', maximum=10000),
+            status=_choice(item, 'status', Milestone.Status.values, Milestone.Status.NOT_STARTED),
+            target_date=_date(item.get('target_date'), 'milestone.target_date'),
+        )
+
+    tasks, parent_refs = {}, {}
+    for item in task_payloads:
+        ref = _ref(item, 'ref')
+        if ref in tasks:
+            raise CodexPlanError(f'Duplicate task ref: {ref}.')
+        milestone_ref = item.get('milestone_ref')
+        if milestone_ref is not None and milestone_ref not in milestones:
+            raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
+        tasks[ref] = Task.objects.create(
+            project=project,
+            milestone=milestones.get(milestone_ref),
+            title=_text(item.get('title'), 'task.title', required=True),
+            description=_text(item.get('description'), 'task.description', maximum=10000),
+            due_date=_date(item.get('due_date'), 'task.due_date'),
+            priority=_choice(item, 'priority', Task.Priority.values, Task.Priority.MEDIUM),
+            status=_choice(item, 'status', Task.Status.values, Task.Status.NOT_STARTED),
+        )
+        parent_refs[ref] = item.get('parent_ref')
+
+    _validate_parent_refs(parent_refs)
+    for ref, parent_ref in parent_refs.items():
+        if parent_ref is not None:
+            tasks[ref].parent = tasks[parent_ref]
+            tasks[ref].save(update_fields=['parent'])
+
+    for item in update_payloads:
+        milestone_ref, task_ref = item.get('milestone_ref'), item.get('task_ref')
+        if milestone_ref is not None and milestone_ref not in milestones:
+            raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
+        if task_ref is not None and task_ref not in tasks:
+            raise CodexPlanError(f'Unknown task_ref: {task_ref}.')
+        Update.objects.create(
+            project=project,
+            milestone=milestones.get(milestone_ref),
+            task=tasks.get(task_ref),
+            author=user,
+            content=_text(item.get('content'), 'update.content', required=True, maximum=10000),
+        )
+
+    for item in document_payloads:
+        milestone_ref = item.get('milestone_ref')
+        task_ref = item.get('task_ref')
+        if milestone_ref is not None and milestone_ref not in milestones:
+            raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
+        if task_ref is not None and task_ref not in tasks:
+            raise CodexPlanError(f'Unknown task_ref: {task_ref}.')
+        Document.objects.create(
+            project=project,
+            milestone=milestones.get(milestone_ref),
+            task=tasks.get(task_ref),
+            title=_text(item.get('title'), 'document.title', required=True),
+            kind=_choice(item, 'kind', Document.Kind.values, Document.Kind.MARKDOWN),
+            content=_text(item.get('content'), 'document.content', maximum=100000),
+            author=user,
+        )
+
+
+def import_project_plan_for_user(user, plan):
+    if not isinstance(plan, dict):
+        raise CodexPlanError('plan must be an object.')
     with transaction.atomic():
         project = Project.objects.create(
             name=_text(plan.get('name'), 'name', required=True),
             description=_text(plan.get('description'), 'description', maximum=10000),
         )
         project.members.add(user)
-
-        milestones = {}
-        for item in milestone_payloads:
-            ref = _ref(item, 'ref')
-            if ref in milestones:
-                raise CodexPlanError(f'Duplicate milestone ref: {ref}.')
-            milestones[ref] = Milestone.objects.create(
-                project=project,
-                title=_text(item.get('title'), 'milestone.title', required=True),
-                description=_text(item.get('description'), 'milestone.description', maximum=10000),
-                status=_choice(item, 'status', Milestone.Status.values, Milestone.Status.NOT_STARTED),
-                target_date=_date(item.get('target_date'), 'milestone.target_date'),
-            )
-
-        tasks, parent_refs = {}, {}
-        for item in task_payloads:
-            ref = _ref(item, 'ref')
-            if ref in tasks:
-                raise CodexPlanError(f'Duplicate task ref: {ref}.')
-            milestone_ref = item.get('milestone_ref')
-            if milestone_ref is not None and milestone_ref not in milestones:
-                raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
-            tasks[ref] = Task.objects.create(
-                project=project,
-                milestone=milestones.get(milestone_ref),
-                title=_text(item.get('title'), 'task.title', required=True),
-                description=_text(item.get('description'), 'task.description', maximum=10000),
-                due_date=_date(item.get('due_date'), 'task.due_date'),
-                priority=_choice(item, 'priority', Task.Priority.values, Task.Priority.MEDIUM),
-                status=_choice(item, 'status', Task.Status.values, Task.Status.NOT_STARTED),
-            )
-            parent_refs[ref] = item.get('parent_ref')
-
-        _validate_parent_refs(parent_refs)
-        for ref, parent_ref in parent_refs.items():
-            if parent_ref is not None:
-                tasks[ref].parent = tasks[parent_ref]
-                tasks[ref].save(update_fields=['parent'])
-
-        for item in update_payloads:
-            milestone_ref, task_ref = item.get('milestone_ref'), item.get('task_ref')
-            if milestone_ref is not None and milestone_ref not in milestones:
-                raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
-            if task_ref is not None and task_ref not in tasks:
-                raise CodexPlanError(f'Unknown task_ref: {task_ref}.')
-            Update.objects.create(
-                project=project,
-                milestone=milestones.get(milestone_ref),
-                task=tasks.get(task_ref),
-                author=user,
-                content=_text(item.get('content'), 'update.content', required=True, maximum=10000),
-            )
-
-        for item in document_payloads:
-            milestone_ref = item.get('milestone_ref')
-            task_ref = item.get('task_ref')
-            if milestone_ref is not None and milestone_ref not in milestones:
-                raise CodexPlanError(f'Unknown milestone_ref: {milestone_ref}.')
-            if task_ref is not None and task_ref not in tasks:
-                raise CodexPlanError(f'Unknown task_ref: {task_ref}.')
-            Document.objects.create(
-                project=project,
-                milestone=milestones.get(milestone_ref),
-                task=tasks.get(task_ref),
-                title=_text(item.get('title'), 'document.title', required=True),
-                kind=_choice(item, 'kind', Document.Kind.values, Document.Kind.MARKDOWN),
-                content=_text(item.get('content'), 'document.content', maximum=100000),
-                author=user,
-            )
+        _append_plan_to_project(project, user, plan)
     return serialize_project(project)
 
 
@@ -237,6 +242,17 @@ def get_private_project_plan_for_user(user, project_id):
         project = _private_projects_for(user).get(pk=project_id)
     except Project.DoesNotExist as exc:
         raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    return serialize_project(project)
+
+
+def append_plan_to_private_project(user, project_id, plan):
+    """Add a complete plan fragment to an existing private Codex project."""
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    with transaction.atomic():
+        _append_plan_to_project(project, user, plan)
     return serialize_project(project)
 
 

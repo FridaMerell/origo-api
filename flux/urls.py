@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from flux.views import (
     CodexProjectPlanDetailView,
+    CodexProjectPlanAppendView,
     CodexProjectPlanListView,
     CodexProjectTaskCreateView,
     DocumentViewSet,
@@ -26,6 +27,7 @@ router.register('updates', UpdateViewSet, basename='update')
 urlpatterns = [
     path('codex/projects/', CodexProjectPlanListView.as_view(), name='codex-project-list'),
     path('codex/projects/<int:project_id>/', CodexProjectPlanDetailView.as_view(), name='codex-project-detail'),
+    path('codex/projects/<int:project_id>/plan/', CodexProjectPlanAppendView.as_view(), name='codex-project-plan-append'),
     path('codex/projects/<int:project_id>/tasks/', CodexProjectTaskCreateView.as_view(), name='codex-project-task-create'),
     path('', include(router.urls)),
 ]
