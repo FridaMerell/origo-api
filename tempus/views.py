@@ -77,6 +77,7 @@ from tempus.serializers import (
     SpeciesResolveRequestSerializer,
     SeasonalOverviewQuerySerializer,
     SeasonalOverviewSerializer,
+    SpeciesCategoryListSerializer,
     SpeciesCategorySerializer,
     SpeciesFollowSerializer,
     SpeciesSearchSerializer,
@@ -165,10 +166,12 @@ class SpeciesViewSet(SharedDataViewSet):
 
     @action(detail=False, methods=["get"], url_path="seasonal-overview")
     def seasonal_overview(self, request):
-        """Paginated species currently entering or leaving season in an area.
+        """Paginated species with a useful current seasonal signal.
 
-        The response is built exclusively from stored eight-year phenograms;
-        it never starts an Artdatabanken crawl in the request cycle.
+        Prefer the selected area's stored eight-year curve. When that is absent,
+        fall back to the species' whole-range curve and label the source so the
+        client can explain the lower geographic precision. No request starts an
+        Artdatabanken crawl.
         """
         params = SeasonalOverviewQuerySerializer(data=request.query_params)
         params.is_valid(raise_exception=True)
@@ -179,31 +182,59 @@ class SpeciesViewSet(SharedDataViewSet):
         )
         queryset = (
             Phenogram.objects.filter(
-                geo_area=opts["geo_area"],
                 years=phenogram.DEFAULT_YEARS,
-                record_count__gte=opts["min_records"],
+            ).filter(
+                Q(geo_area=opts["geo_area"]) | Q(geo_area__isnull=True)
             )
             .select_related("species")
             .annotate(is_followed=Exists(followed))
-            .order_by("species__swedish_name", "species__scientific_name")
         )
         if "is_followed" in opts:
             queryset = queryset.filter(is_followed=opts["is_followed"])
 
-        wanted = set(opts["status"])
+        wanted = opts["status"]
         if opts.get("is_followed") and "status" not in request.query_params:
-            wanted = {
+            wanted = [
                 "at_peak",
                 "in_season",
                 "coming_into_season",
                 "going_out_of_season",
                 "out_of_season",
-            }
-        matches = []
+            ]
+        # One card per species. A local curve always beats the whole-range
+        # fallback, even if the fallback has more records.
+        selected = {}
         for row in queryset:
+            is_local = row.geo_area_id == opts["geo_area"].pk
+            previous = selected.get(row.species_id)
+            if previous is None or is_local:
+                row._phenogram_scope = "selected_area" if is_local else "whole_range"
+                selected[row.species_id] = row
+
+        matches = []
+        for row in selected.values():
             row._seasonal_status = season.status_for(row)
-            if any(season.matches_status(row, item) for item in wanted):
+            matching_statuses = [
+                index
+                for index, item in enumerate(wanted)
+                if season.matches_status(row, item)
+            ]
+            if matching_statuses:
+                row._seasonal_rank = matching_statuses[0]
+                row._is_low_confidence = row.record_count < opts["min_records"]
                 matches.append(row)
+
+        matches.sort(
+            key=lambda row: (
+                not row.is_followed,
+                row._seasonal_rank,
+                row._phenogram_scope != "selected_area",
+                row._is_low_confidence,
+                -row.record_count,
+                row.species.swedish_name.casefold(),
+                row.species.scientific_name.casefold(),
+            )
+        )
 
         page = self.paginate_queryset(matches)
         serializer = SeasonalOverviewSerializer(page, many=True)
@@ -434,12 +465,9 @@ class SpeciesViewSet(SharedDataViewSet):
 
 
 class SpeciesCategoryViewSet(SharedDataViewSet):
-    queryset = SpeciesCategory.objects.prefetch_related(
-        "taxon",
-        "memberships__species",
-        "children",
-    ).all()
+    queryset = SpeciesCategory.objects.all()
     serializer_class = SpeciesCategorySerializer
+    pagination_class = StandardPagination
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["taxon_id", "parent_category", "is_primary"]
     ordering_fields = [
@@ -451,6 +479,17 @@ class SpeciesCategoryViewSet(SharedDataViewSet):
     ]
     ordering = ["taxon_id", "label"]
     lookup_field = "taxon_id"
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == "retrieve":
+            return queryset.prefetch_related("taxon", "memberships", "children")
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return SpeciesCategoryListSerializer
+        return super().get_serializer_class()
 
 
 class PhenophaseViewSet(SharedDataViewSet):
@@ -468,6 +507,11 @@ class GeoAreaViewSet(SharedDataViewSet):
     queryset = GeoArea.objects.all()
     serializer_class = GeoAreaSerializer
     filterset_fields = ["kind", "country_code"]
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        response["Cache-Control"] = "private, max-age=3600"
+        return response
 
 
 class PhenogramViewSet(viewsets.ReadOnlyModelViewSet):

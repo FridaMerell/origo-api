@@ -100,7 +100,7 @@ class SpeciesResolveRequestSerializer(serializers.Serializer):
 
 
 class SpeciesCategoryMembershipSerializer(serializers.ModelSerializer):
-    species = serializers.PrimaryKeyRelatedField(read_only=True)
+    species = serializers.UUIDField(source="species_id", read_only=True)
 
     class Meta:
         model = SpeciesCategoryMembership
@@ -136,10 +136,16 @@ class SpeciesCategorySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "species", "species_memberships", "species_count"]
 
     def get_species_count(self, obj):
-        return len(obj.effective_species_ids())
+        return len(self._effective_species_ids(obj))
 
     def get_species(self, obj):
-        return [str(pk) for pk in obj.effective_species_ids()]
+        return [str(pk) for pk in self._effective_species_ids(obj)]
+
+    @staticmethod
+    def _effective_species_ids(obj):
+        if not hasattr(obj, "_serializer_effective_species_ids"):
+            obj._serializer_effective_species_ids = obj.effective_species_ids()
+        return obj._serializer_effective_species_ids
 
     def validate_parent_category(self, parent_category):
         if parent_category is None or self.instance is None:
@@ -152,6 +158,24 @@ class SpeciesCategorySerializer(serializers.ModelSerializer):
                 )
             ancestor = ancestor.parent_category
         return parent_category
+
+
+class SpeciesCategoryListSerializer(serializers.ModelSerializer):
+    """Small category-navigation representation for paginated lists."""
+
+    parent_category = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = SpeciesCategory
+        fields = [
+            "id",
+            "parent_category",
+            "is_primary",
+            "label",
+            "image_url",
+            "taxon_id",
+        ]
+        read_only_fields = ["id"]
 
 
 class RegisterSpeciesSerializer(serializers.Serializer):
@@ -357,7 +381,7 @@ class SeasonalOverviewQuerySerializer(serializers.Serializer):
     min_records = serializers.IntegerField(min_value=0, required=False, default=20)
     status = serializers.CharField(
         required=False,
-        default="coming_into_season,going_out_of_season",
+        default="coming_into_season,at_peak,in_season,going_out_of_season",
     )
     is_followed = serializers.BooleanField(required=False)
 
@@ -389,6 +413,10 @@ class SeasonalOverviewSerializer(serializers.ModelSerializer):
     seasonal_status = serializers.SerializerMethodField()
     activity_window = serializers.SerializerMethodField()
     habitats = serializers.SerializerMethodField()
+    phenogram_scope = serializers.CharField(source="_phenogram_scope", read_only=True)
+    is_low_confidence = serializers.BooleanField(
+        source="_is_low_confidence", read_only=True
+    )
     landscape_types = serializers.JSONField(
         source="species.landscape_types", read_only=True
     )
@@ -402,6 +430,10 @@ class SeasonalOverviewSerializer(serializers.ModelSerializer):
             "scientific_name",
             "is_followed",
             "record_count",
+            "confidence",
+            "years_present",
+            "phenogram_scope",
+            "is_low_confidence",
             "seasonal_status",
             "activity_window",
             "peak_week",

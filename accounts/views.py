@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model, login, logout
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from accounts.models import Notification
 from accounts.serializers import LoginSerializer, NotificationSerializer, UserSerializer
+from origo.pagination import StandardPagination
 
 User = get_user_model()
 
@@ -54,13 +55,20 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['id', 'username', 'email']
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         """Users who share a Flux project or Verso house with the requester."""
         return User.objects.filter(
             Q(projects__members=self.request.user)
             | Q(houses__members=self.request.user)
-        ).exclude(pk=self.request.user.pk).distinct()
+        ).exclude(pk=self.request.user.pk).annotate(
+            open_notifications=Count(
+                "notifications",
+                filter=Q(notifications__is_read=False),
+                distinct=True,
+            )
+        ).distinct()
 
 class SelfViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
