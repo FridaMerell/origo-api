@@ -24,13 +24,35 @@ Artfakta habitat significance (`stor`/`har`) is a different concept from the
 
 ## Categories and follows
 
-`SpeciesCategory` represents a useful taxonomic grouping and has an explicit
-many-to-many species list. The category's `taxon_id` can identify any useful
-parent rank; member species do not have to be inferred dynamically.
+`SpeciesCategory` represents a useful taxonomic grouping. Membership is an
+explicit list through the `SpeciesCategoryMembership` join model (unique per
+category/species); species do not have to be inferred dynamically. The
+category's `taxon_id` can identify any useful parent rank.
+
+Categories form a tree: `parent_category` is a nullable self-reference
+(`SET_NULL`, reverse `children`) and the API rejects an edit that would create
+a cycle. `is_primary` flags the main categories a client should surface first,
+and `image_url` holds an optional externally hosted illustration.
+
+The API exposes both the direct members and the **effective** set:
+`effective_species_ids()` is every species assigned to the category or any of
+its descendants. The serializer returns `species` (effective ids),
+`species_memberships` (direct join rows), and `species_count` (effective size).
+The list endpoint returns a lighter payload than the detail view, is paginated,
+and is addressed by `taxon_id` rather than the UUID
+(`/api/tempus/species-categories/{taxon_id}/`). Filters: `taxon_id`,
+`parent_category`, `is_primary`.
 
 `SpeciesFollow` is user-owned and unique per user/species. It stores priority,
 notification preference, notes, and creation time. API species representations
-are annotated with whether the current user follows them.
+are annotated with whether the current user follows them. Besides normal
+`DELETE /api/tempus/species-follows/{id}/`, a follow can be removed by Dyntaxa
+taxon id with `DELETE /api/tempus/species-follows/unfollow/?species=<dyntaxa-id>`.
+
+`POST /api/tempus/species/resolve/` takes `{ "ids": [<species-uuid>, ...] }`
+(at most 100, unique) and returns the matching cached species. It is a
+read-only bulk lookup for hydrating a client's stored id list; it never
+registers or refreshes anything.
 
 ## Registration and synchronization
 

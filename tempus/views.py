@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django_filters.rest_framework import (
     BooleanFilter,
+    CharFilter,
     DjangoFilterBackend,
     FilterSet,
     NumberFilter,
@@ -115,10 +116,28 @@ class ObservationFilter(FilterSet):
     """Filters for a user's observations."""
 
     checklist = UUIDFilter(field_name="checklist_items__checklist_id")
+    # Accepts either a Species UUID (primary key) or a Dyntaxa taxon id.
+    species = CharFilter(method="filter_species")
 
     class Meta:
         model = Observation
         fields = ["species", "checklist_items"]
+
+    def filter_species(self, queryset, name, value):
+        value = value.strip()
+        if not value:
+            return queryset
+        try:
+            uuid.UUID(value)
+        except (ValueError, AttributeError):
+            pass
+        else:
+            return queryset.filter(species_id=value)
+        if value.isdigit():
+            return queryset.filter(species__dyntaxa_taxon_id=int(value))
+        raise ValidationError(
+            {"species": "Ange ett Species-UUID eller ett Dyntaxa-taxon-id."}
+        )
 
 
 class SpeciesViewSet(SharedDataViewSet):
@@ -508,6 +527,20 @@ class SpeciesFollowViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["delete"], permission_classes=[permissions.IsAuthenticated])
+    def unfollow(self, request):
+        """Remove the current user's follow for a species, addressed by its
+        Dyntaxa taxon id (``DELETE /species-follows/unfollow/?species=<id>``)."""
+        species = request.query_params.get("species")
+        if not species or not str(species).isdigit():
+            raise ValidationError({"species": "Ange artens Dyntaxa-taxon-id."})
+        deleted, _ = (
+            self.get_queryset().filter(species__dyntaxa_taxon_id=species).delete()
+        )
+        if not deleted:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RouteViewSet(viewsets.ModelViewSet):

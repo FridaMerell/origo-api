@@ -62,14 +62,15 @@ must all belong to the user, and must all refer to one species.
   and `route`. Responses include derived `species_count`.
 - `/api/tempus/checklist-items/`: user-scoped CRUD; filters `checklist` and
   `species`.
-- `/api/tempus/observations/`: user-scoped CRUD; filters `species` and
-  `checklist_items`.
+- `/api/tempus/observations/`: user-scoped CRUD; filters `checklist_items` and
+  `species`. The `species` filter accepts either a Species UUID or a Dyntaxa
+  taxon id; `species` in the request body accepts the same two forms.
 
 Example observation:
 
 ```json
 {
-  "species": "<species-uuid>",
+  "species": "<species-uuid or dyntaxa-taxon-id>",
   "checklist_items": ["<item-uuid>"],
   "observed_at": "2026-08-30T10:15:00+02:00",
   "location": {"type": "Point", "coordinates": [14.1567, 56.0294]},
@@ -77,6 +78,9 @@ Example observation:
   "notes": "Two individuals calling"
 }
 ```
+
+A non-browser client can create observations with a token — see
+[Registrera en Tempus-observation med User token](extern-klient-observationer.md).
 
 These are internal Tempus observations. They are not automatically reported to
 Artportalen; see [Artportalen reporting](artdatabanken/artportalen-write.md).

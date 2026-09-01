@@ -2,7 +2,9 @@
 
 Base prefix: `/api/tempus/`, except the BirdNET endpoints. Standard router resources
 support trailing slashes. Unless stated otherwise, authentication is the normal
-DRF browser/session authentication.
+DRF browser/session authentication; `Authorization: Token <key>` is also
+accepted for non-browser clients (see [Accounts tokens](../accounts/README.md#tokens)
+for issuing one).
 
 ## Shared reference data
 
@@ -11,16 +13,17 @@ Authenticated reads; staff-only writes.
 | Path | Operations and filters |
 |---|---|
 | `species/` | CRUD; search names; filters include Dyntaxa ID, rank, active state, and category |
-| `species-categories/` | CRUD; lookup by `taxon_id`, filter `taxon_id` |
+| `species-categories/` | CRUD; URL lookup and detail addressed by `taxon_id`; filters `taxon_id`, `parent_category`, `is_primary`; ordering by `taxon_id`, `label`, `parent_category`, `parent_category__label`, `is_primary`; list is paginated and lighter than the detail payload |
 | `phenophases/` | CRUD; filter `code` |
 | `sources/` | CRUD |
-| `geo-areas/` | CRUD; filters `kind`, `country_code` |
+| `geo-areas/` | CRUD; filters `kind`, `country_code`; list responses carry `Cache-Control: private, max-age=3600` |
 
 Species actions:
 
 | Method and path | Purpose |
 |---|---|
 | `GET species/search/?q=...` | Search Dyntaxa; optional `under_taxon_id`, `limit` |
+| `POST species/resolve/` | Read-only bulk fetch: body `{ "ids": [<species-uuid>, ...] }` (max 100, unique); returns the matching cached species without touching state |
 | `POST species/register/` | Register one Dyntaxa taxon in a category |
 | `POST species/import-checklist/` | Queue multipart CSV import |
 | `POST species/{dyntaxa-id}/resync/` | Refresh one cached species |
@@ -56,25 +59,32 @@ silently excluded. The response identifies these cases with:
 Clients should explain a `whole_range` card as non-local data and label a
 low-confidence card accordingly.
 
+Results are ordered followed-first, then by status priority, local curve before
+whole-range, higher confidence, and finally by name. When `is_followed=true` is
+given without an explicit `status`, the status set is widened to every state and
+the result is capped at 15 cards so out-of-season follows do not crowd the view.
+
 | Path | Operations and filters |
 |---|---|
 | `phenograms/` | Read-only; `species`, `geo_area`, `years`, `status` |
 
-Notifications are available at `/api/accounts/notifications/`. They are
-read-only for the current user and support `domain`, `is_read`, and `unread`
-filtering. The Tempus season notification is delivered as one combined weekly
-digest when followed species start their season 7-14 days later.
+Notifications are available at `/api/accounts/notifications/` — read-only for
+the current user, with `domain`, `is_read`, and `unread` filtering plus
+`summary/`, `{id}/read/`, and `read-all/` actions (see
+[Accounts](../accounts/README.md#notifications)). The Tempus season
+notification is delivered as one combined weekly digest when followed species
+start their season 7-14 days later.
 
 ## User-owned resources
 
 | Path | Operations and filters |
 |---|---|
-| `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled` |
+| `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled`. `DELETE species-follows/unfollow/?species=<dyntaxa-id>` removes the caller's follow addressed by Dyntaxa taxon id (`204`, or `404` if not followed) |
 | `routes/` | CRUD for current user; `planned_date` |
 | `route-stops/` | CRUD for current user's routes; `route` |
 | `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route` |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
-| `observations/` | CRUD for current user; `species`, `checklist_items` |
+| `observations/` | CRUD for current user; `checklist_items`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id) |
 | `birdnet-devices/` | CRUD for devices shared with current user |
 
 Route calculation:

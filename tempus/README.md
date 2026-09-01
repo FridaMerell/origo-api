@@ -24,9 +24,12 @@ The first version provides models for:
 - personal checklists whose items are completed by sightings; and
 - observations registered by users.
 
-The app also contains a typed service boundary for future integration with SLU
-Artdatabanken's APIs. It does not currently provide serializers, views, API
-endpoints, administration, or imported observation data.
+The app exposes these through Django REST Framework serializers and viewsets
+under `/api/tempus/`, a Django admin registration, background tasks
+(`django-tasks`), and a typed service boundary that calls SLU Artdatabanken's
+Dyntaxa, Artfakta, and Species Observation System APIs. See
+[`docs/tempus/`](../docs/tempus/README.md) for the API contract and feature
+documentation.
 
 ## Domain model
 
@@ -67,16 +70,23 @@ orchids using the most appropriate Dyntaxa taxon for each group. An optional
 not handle the upload itself; a frontend uploads the image and saves the
 resulting URL.
 
-`species` is a plain many-to-many to `Species` — the explicit member list for
-the category. Membership is managed explicitly for now (via `register_species`
-or the admin) and may later be derived from Dyntaxa ancestry in the service
-layer.
+`species` is a many-to-many to `Species` through `SpeciesCategoryMembership`
+(unique per category/species) — the explicit member list, managed via
+`register_species` or the admin.
+
+Categories also form a tree through the nullable self-reference
+`parent_category` (`SET_NULL`, reverse `children`). `effective_species_ids()`
+returns the members of the category plus every descendant category, so a parent
+category resolves the union of its subtree. `is_primary` marks the categories a
+client should surface first.
 
 ### SpeciesFollow
 
 `SpeciesFollow` connects a user with a species they want to follow. It stores a
 priority, notification preference, notes, and creation time. A user can follow
-each species only once.
+each species only once. Follows are removed with
+`DELETE /api/tempus/species-follows/{id}/` or, by Dyntaxa taxon id, with
+`DELETE /api/tempus/species-follows/unfollow/?species=<dyntaxa-id>`.
 
 ### Phenophase
 
@@ -296,18 +306,16 @@ Resync is exposed three ways:
   `--older-than DAYS`, `--all`, `--taxon <id>` (repeatable),
   `--missing biotopes` (repeatable), `--dry-run`.
 
-Actual HTTP requests have intentionally not been implemented because the API
-configuration and confirmed response schemas are not yet available. Calling a
-configured-only function currently raises
-`ArtdatabankenConfigurationError`.
-
-Before implementing HTTP calls, provide:
-
-- the taxonomy API base URL and version;
-- the species-information API base URL and version;
-- authentication method and credentials;
-- request timeout and retry policy; and
-- confirmed request and response schemas.
+The HTTP adapter is implemented: `tempus/services/artdatabanken.py` calls
+Dyntaxa, Artfakta, and the Species Observation System over `requests`, with a
+shared cross-process request cooldown. Each product needs its own
+`Ocp-Apim-Subscription-Key`; a call made without the required configuration
+raises `ArtdatabankenConfigurationError`, and a non-success HTTP response
+raises `ArtdatabankenAPIError`. Base URLs, keys, timeouts, and the cooldown are
+set through environment variables — see
+[`docs/tempus/artdatabanken/authentication.md`](../docs/tempus/artdatabanken/authentication.md).
+OAuth (for protected SOS coordinates and Artportalen writes) is not
+implemented.
 
 API requests must remain in the service layer and must never be added to model
 `save()` methods.
@@ -339,8 +347,8 @@ spatial indexes or intersection queries.
 
 ## Migrations
 
-No migration files are included by this implementation. Run the project's
-normal migration flow yourself from the Django project root:
+Run the project's normal migration flow yourself from the Django project root
+after changing models:
 
 ```powershell
 python manage.py makemigrations tempus
@@ -350,9 +358,9 @@ python manage.py migrate
 ## Suggested next steps
 
 1. Configure the normal PostgreSQL connection used by the project.
-2. Confirm Artdatabanken API contracts and implement the HTTP adapter.
-3. Create initial phenophases through the project's chosen data-management
+2. Create initial phenophases through the project's chosen data-management
    process.
-4. Add application-layer queries for in season, starting soon, and last chance.
-5. Add route-corridor spatial queries.
-6. Extend the existing serializers and endpoints as their API contract evolves.
+3. Add route-corridor spatial queries.
+4. Add protected-SOS/Artportalen OAuth when access is granted (see
+   [`docs/tempus/artdatabanken/`](../docs/tempus/artdatabanken/README.md)).
+5. Extend the existing serializers and endpoints as their API contract evolves.

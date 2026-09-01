@@ -4,10 +4,14 @@ Origo is a Django API that serves as the shared backend for multiple apps:
 
 - **Flux** — project management
 - **Verso** — house maintenance
+- **Tempus** — species following, seasonality (phenograms), observations,
+  nature routes, and short-lived BirdNET detections
 
-A separate Next.js monorepo provides the frontends for both apps, served on
-their own subdomains, and stays signed in across both via a shared Django
+A separate Next.js monorepo provides the frontends for these apps, served on
+their own subdomains, and stays signed in across them via a shared Django
 session cookie.
+
+Feature and API documentation lives in [`docs/`](docs/README.md).
 
 ## App structure
 
@@ -15,10 +19,13 @@ session cookie.
   (`AUTH_USER_MODEL = 'accounts.User'`) and Django's built-in `Group` model.
 - `flux` — project management, mounted at `/api/flux/`.
 - `verso` — house maintenance, mounted at `/api/verso/`.
+- `tempus` — species, seasonality, observations, routes, and BirdNET, mounted
+  at `/api/tempus/` (BirdNET ingest/stream at `/api/birdnet/`).
 
 The API is built with Django REST Framework, authenticated via DRF's
 `SessionAuthentication` so the frontend's session cookie authenticates API
-calls directly.
+calls directly. `TokenAuthentication` is also enabled for non-browser clients
+such as BirdNET field devices; tokens are issued under `/api/accounts/`.
 
 ## Cross-subdomain sessions
 

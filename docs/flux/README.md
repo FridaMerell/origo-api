@@ -2,6 +2,9 @@
 
 Flux is the project-management API mounted at `/api/flux/`.
 
+People are added to a project either directly or through a shareable invite
+link — see [Inbjudningar](../accounts/invitations.md).
+
 ## API resources
 
 - `projects`
