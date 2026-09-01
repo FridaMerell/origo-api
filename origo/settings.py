@@ -330,7 +330,9 @@ def _explicit_origins(name):
     return origins
 
 
-DEFAULT_FRONTEND_ORIGINS = _frontend_origins(schemes=('https',))
+DEFAULT_FRONTEND_ORIGINS = _frontend_origins(schemes=('https',)) + [
+    f'https://{domain}' for domain in DOMAINS
+]
 if DEBUG:
     DEFAULT_FRONTEND_ORIGINS += _frontend_origins(
         schemes=('http', 'https'), ports=FRONTEND_DEV_PORTS,

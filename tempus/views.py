@@ -98,9 +98,24 @@ def _is_true(value):
 
 
 class SpeciesFilter(FilterSet):
-    category = NumberFilter(field_name="categories__taxon_id")
+    # Species assigned to this category *or any of its subcategories* -
+    # mirrors SpeciesCategory.effective_species_ids so a category page's
+    # species list matches its species_count.
+    category = NumberFilter(method="filter_category")
     categories__taxon_id = NumberFilter(field_name="categories__taxon_id")
     is_followed = BooleanFilter(field_name="is_followed")
+
+    def filter_category(self, queryset, name, value):
+        try:
+            category = SpeciesCategory.objects.get(taxon_id=value)
+        except SpeciesCategory.DoesNotExist:
+            return queryset.none()
+        category_ids = [
+            c.pk for c in category.descendant_categories(include_self=True)
+        ]
+        return queryset.filter(
+            category_memberships__category_id__in=category_ids
+        ).distinct()
 
     class Meta:
         model = Species
@@ -187,18 +202,21 @@ class SpeciesViewSet(SharedDataViewSet):
         params = SeasonalOverviewQuerySerializer(data=request.query_params)
         params.is_valid(raise_exception=True)
         opts = params.validated_data
+        geo_area = opts["geo_area"]
 
         followed = SpeciesFollow.objects.filter(
             species_id=OuterRef("species_id"), user=request.user
         )
-        queryset = (
-            Phenogram.objects.filter(
-                years=phenogram.DEFAULT_YEARS,
-            ).filter(
-                Q(geo_area=opts["geo_area"]) | Q(geo_area__isnull=True)
-            )
-            .select_related("species")
-            .annotate(is_followed=Exists(followed))
+        queryset = Phenogram.objects.filter(years=phenogram.DEFAULT_YEARS)
+        # No area selected ("whole Sweden") -> only the whole-range curves
+        # exist to show; a selected area also falls back to those.
+        queryset = queryset.filter(
+            Q(geo_area=geo_area) | Q(geo_area__isnull=True)
+            if geo_area is not None
+            else Q(geo_area__isnull=True)
+        )
+        queryset = queryset.select_related("species").annotate(
+            is_followed=Exists(followed)
         )
         if "is_followed" in opts:
             queryset = queryset.filter(is_followed=opts["is_followed"])
@@ -219,7 +237,7 @@ class SpeciesViewSet(SharedDataViewSet):
         # fallback, even if the fallback has more records.
         selected = {}
         for row in queryset:
-            is_local = row.geo_area_id == opts["geo_area"].pk
+            is_local = geo_area is not None and row.geo_area_id == geo_area.pk
             previous = selected.get(row.species_id)
             if previous is None or is_local:
                 row._phenogram_scope = "selected_area" if is_local else "whole_range"
