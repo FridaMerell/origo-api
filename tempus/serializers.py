@@ -85,6 +85,20 @@ class SpeciesSerializer(serializers.ModelSerializer):
         ]
 
 
+class SpeciesResolveRequestSerializer(serializers.Serializer):
+    """Validate the bounded set of species ids requested by a client."""
+
+    ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        max_length=100,
+    )
+
+    def validate_ids(self, value):
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError("Species ids must be unique.")
+        return value
+
+
 class SpeciesCategoryMembershipSerializer(serializers.ModelSerializer):
     species = serializers.PrimaryKeyRelatedField(read_only=True)
 

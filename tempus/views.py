@@ -74,6 +74,7 @@ from tempus.serializers import (
     RouteStopSerializer,
     SourceSerializer,
     SpeciesResyncSerializer,
+    SpeciesResolveRequestSerializer,
     SeasonalOverviewQuerySerializer,
     SeasonalOverviewSerializer,
     SpeciesCategorySerializer,
@@ -146,6 +147,21 @@ class SpeciesViewSet(SharedDataViewSet):
             species=OuterRef("pk"), user=user
         )
         return super().get_queryset().annotate(is_followed=Exists(followed)).distinct()
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="resolve",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def resolve(self, request):
+        """Return the requested Tempus species without changing any state."""
+        request_serializer = SpeciesResolveRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        species = self.get_queryset().filter(
+            id__in=request_serializer.validated_data["ids"]
+        )
+        return Response(self.get_serializer(species, many=True).data)
 
     @action(detail=False, methods=["get"], url_path="seasonal-overview")
     def seasonal_overview(self, request):
