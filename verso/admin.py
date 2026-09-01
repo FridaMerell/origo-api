@@ -1,31 +1,32 @@
 from django.contrib import admin
 from verso.models import House, Booking, BookingRequest, CheckOut, Venture, VentureTask, Expense, VersoUpdate
+from origo.admin import site
 
-@admin.register(VersoUpdate)
+@admin.register(VersoUpdate, site=site)
 class VersoUpdateAdmin(admin.ModelAdmin):
     list_display = ('venture', 'task', 'author', 'title', 'created_at', 'updated_at')
 
 # Register your models here.
-@admin.register(House)
+@admin.register(House, site=site)
 class HouseAdmin(admin.ModelAdmin):
     list_display = ('name', 'address', 'created_at', 'updated_at')
 
-@admin.register(Booking)
+@admin.register(Booking, site=site)
 class BookingAdmin(admin.ModelAdmin):
     list_display = ('house', 'visitor', 'start_date', 'end_date', 'created_at', 'updated_at')
 
-@admin.register(BookingRequest)
+@admin.register(BookingRequest, site=site)
 class BookingRequestAdmin(admin.ModelAdmin):
     list_display = ('house', 'requester', 'start_date', 'end_date', 'status', 'created_at', 'updated_at')
 
-@admin.register(Venture)
+@admin.register(Venture, site=site)
 class VentureAdmin(admin.ModelAdmin):
     list_display = ('name', 'description', 'priority', 'budget', 'created_at', 'updated_at')
 
-@admin.register(VentureTask)
+@admin.register(VentureTask, site=site)
 class VentureTaskAdmin(admin.ModelAdmin):
     list_display = ('venture', 'name', 'description', 'completed', 'created_at', 'updated_at')
 
-@admin.register(Expense)
+@admin.register(Expense, site=site)
 class ExpenseAdmin(admin.ModelAdmin):
     list_display = ('venture', 'amount', 'description', 'date_incurred', 'created_at', 'updated_at', 'house')

@@ -655,7 +655,7 @@ _normalize_landscapes = _normalize_speciesdata
 
 
 @transaction.atomic
-def upsert_species(taxon_id: int) -> Species:
+def upsert_species(taxon_id: int, *, taxon: TaxonData | None = None) -> Species:
     """Create or refresh the local Species cache from Dyntaxa and Artfakta.
 
     Dyntaxa taxonomy is required. Artfakta data - species information,
@@ -664,7 +664,7 @@ def upsert_species(taxon_id: int) -> Species:
     skipped and its previously stored value kept. This is also the resync path:
     it is ``update_or_create`` on ``dyntaxa_taxon_id``.
     """
-    taxon = get_taxon(taxon_id)
+    taxon = taxon or get_taxon(taxon_id)
     raw_data = dict(taxon["api_data"])
     try:
         raw_data["species_information"] = get_species_information(taxon_id)
@@ -707,14 +707,24 @@ def upsert_species(taxon_id: int) -> Species:
 @transaction.atomic
 def register_species(
     *, category: SpeciesCategory, dyntaxa_taxon_id: int
-) -> Species:
+) -> Species | None:
     """Fetch a taxon from the Artdatabanken APIs and file it under ``category``.
 
     Pulls taxonomy (Dyntaxa) and species information (Artfakta) for
     ``dyntaxa_taxon_id``, caches it as a local :class:`Species`, and adds it to
-    ``category.species`` (idempotent).
+    ``category.species`` (idempotent). Taxa without a Swedish name are not
+    imported and return ``None``.
     """
-    species = upsert_species(dyntaxa_taxon_id)
+    taxon = get_taxon(dyntaxa_taxon_id)
+    if not taxon.get("swedish_name", "").strip():
+        logger.info(
+            "register_species(category=%s, taxon=%s) skipped: no Swedish name",
+            category.pk,
+            dyntaxa_taxon_id,
+        )
+        return None
+
+    species = upsert_species(dyntaxa_taxon_id, taxon=taxon)
     SpeciesCategoryMembership.objects.update_or_create(
         category=category,
         species=species,

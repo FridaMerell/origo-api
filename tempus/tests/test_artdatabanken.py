@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from tempus.models import Species
+from tempus.models import Species, SpeciesCategory
 from tempus.services import artdatabanken as adb
 
 _SETTINGS = {
@@ -189,6 +189,18 @@ class UpsertSpeciesTests(TestCase):
         species = adb.upsert_species(101664)
         self.assertEqual(len(species.landscape_types), 1)
         self.assertEqual(species.biotopes, [])  # model default, fetch skipped
+
+    def test_register_skips_taxon_without_swedish_name(self):
+        taxon = dict(self.TAXON)
+        taxon["names"] = [self.TAXON["names"][0]]
+        session = _use(self, FakeResponse(body=[taxon]))
+        category = SpeciesCategory.objects.create(label="Test category")
+
+        species = adb.register_species(category=category, dyntaxa_taxon_id=101664)
+
+        self.assertIsNone(species)
+        self.assertEqual(Species.objects.count(), 0)
+        self.assertEqual(len(session.calls), 1)
 
 
 @override_settings(ARTDATABANKEN=_SETTINGS)

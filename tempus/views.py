@@ -16,6 +16,7 @@ from django_filters.rest_framework import (
     DjangoFilterBackend,
     FilterSet,
     NumberFilter,
+    UUIDFilter,
 )
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -120,6 +121,16 @@ class SpeciesFilter(FilterSet):
         ]
 
 
+class ObservationFilter(FilterSet):
+    """Filters for a user's observations."""
+
+    checklist = UUIDFilter(field_name="checklist_items__checklist_id")
+
+    class Meta:
+        model = Observation
+        fields = ["species", "checklist_items"]
+
+
 class SpeciesViewSet(SharedDataViewSet):
     queryset = Species.objects.all()
     serializer_class = SpeciesSerializer
@@ -160,8 +171,18 @@ class SpeciesViewSet(SharedDataViewSet):
             .annotate(is_followed=Exists(followed))
             .order_by("species__swedish_name", "species__scientific_name")
         )
+        if "is_followed" in opts:
+            queryset = queryset.filter(is_followed=opts["is_followed"])
 
         wanted = set(opts["status"])
+        if opts.get("is_followed") and "status" not in request.query_params:
+            wanted = {
+                "at_peak",
+                "in_season",
+                "coming_into_season",
+                "going_out_of_season",
+                "out_of_season",
+            }
         matches = []
         for row in queryset:
             row._seasonal_status = season.status_for(row)
@@ -191,6 +212,11 @@ class SpeciesViewSet(SharedDataViewSet):
             )
         except artdatabanken.ArtdatabankenAPIError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        if species is None:
+            return Response(
+                {"detail": "Taxonet saknar ett svenskt namn och importerades inte."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(
             self.get_serializer(species).data, status=status.HTTP_201_CREATED
         )
@@ -656,10 +682,14 @@ class ObservationViewSet(viewsets.ModelViewSet):
     serializer_class = ObservationSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ["species", "checklist_items"]
+    filterset_class = ObservationFilter
 
     def get_queryset(self):
-        return Observation.objects.filter(user=self.request.user).prefetch_related("checklist_items")
+        return (
+            Observation.objects.filter(user=self.request.user)
+            .prefetch_related("checklist_items")
+            .distinct()
+        )
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

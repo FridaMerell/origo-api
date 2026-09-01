@@ -136,12 +136,18 @@ class VentureSerializer(serializers.ModelSerializer):
         return attrs
 
     def get_finished_tasks_count(self, obj):
+        if hasattr(obj, 'finished_tasks_count'):
+            return obj.finished_tasks_count
         return obj.tasks.filter(completed=True).count()
 
     def get_total_tasks_count(self, obj):
+        if hasattr(obj, 'total_tasks_count'):
+            return obj.total_tasks_count
         return obj.tasks.count()
 
     def get_total_spent(self, obj):
+        if hasattr(obj, 'total_spent'):
+            return obj.total_spent or 0.00
         return obj.expenses.aggregate(total=models.Sum("amount"))["total"] or 0.00
 
 

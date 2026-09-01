@@ -42,7 +42,9 @@ class _patch:
 class GeneratePhenogramTaskTests(TestCase):
     def setUp(self):
         self.species = Species.objects.create(
-            dyntaxa_taxon_id=101664, scientific_name="Anthocharis cardamines"
+            dyntaxa_taxon_id=101664,
+            scientific_name="Anthocharis cardamines",
+            swedish_name="aurorafjäril",
         )
         self.area = GeoArea.objects.create(
             name="Sverige", kind=GeoArea.Kind.COUNTRY, country_code="SE", geometry=SWEDEN
@@ -59,6 +61,16 @@ class GeneratePhenogramTaskTests(TestCase):
         called = []
         with _patch(tasks.phenogram, "get_phenogram", lambda *a, **k: called.append(1)):
             tasks.generate_phenogram.enqueue(999999, self.area.pk)
+        self.assertEqual(called, [])
+
+    def test_unit_task_without_swedish_name_is_a_no_op(self):
+        unnamed_species = Species.objects.create(
+            dyntaxa_taxon_id=101665,
+            scientific_name="Unnamed species",
+        )
+        called = []
+        with _patch(tasks.phenogram, "get_phenogram", lambda *a, **k: called.append(1)):
+            tasks.generate_phenogram.enqueue(unnamed_species.pk, self.area.pk)
         self.assertEqual(called, [])
 
     def test_unit_task_swallows_artdatabanken_errors(self):
@@ -80,13 +92,18 @@ class GeneratePhenogramTaskTests(TestCase):
         self.assertEqual({args[1] for args, _ in enqueued},
                          {str(pk) for pk in GeoArea.objects.values_list("pk", flat=True)})
 
-    def test_fan_out_area_enqueues_one_per_species(self):
+    def test_fan_out_area_enqueues_only_species_with_swedish_names(self):
         Species.objects.create(dyntaxa_taxon_id=222, scientific_name="Pieris napi")
+        Species.objects.create(
+            dyntaxa_taxon_id=223,
+            scientific_name="No Swedish name",
+            swedish_name="",
+        )
         enqueued = []
         with _patch(tasks.generate_phenogram, "enqueue",
                     lambda *a, **k: enqueued.append(a)):
             tasks.fan_out_area_phenograms.enqueue(self.area.pk)
-        self.assertEqual(len(enqueued), 2)
+        self.assertEqual(len(enqueued), 1)
 
 
 @override_settings(TASKS=IMMEDIATE)

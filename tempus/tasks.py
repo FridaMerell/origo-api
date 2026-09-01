@@ -30,6 +30,11 @@ from tempus.services import artdatabanken, phenogram, route_planner
 logger = logging.getLogger(__name__)
 
 
+def _has_swedish_name(species) -> bool:
+    """Whether a species has a usable Swedish vernacular name."""
+    return bool(species.swedish_name and species.swedish_name.strip())
+
+
 def enqueue_phenogram_generation(species_pk, geo_area_pk=None, *, years=None, refresh=True):
     """Queue at most one pending or running build for one (species, area).
 
@@ -40,7 +45,7 @@ def enqueue_phenogram_generation(species_pk, geo_area_pk=None, *, years=None, re
 
     years = years or phenogram.DEFAULT_YEARS
     species = Species.objects.filter(pk=species_pk).first()
-    if species is None:
+    if species is None or not _has_swedish_name(species):
         return None, False
     geo_area = (
         GeoArea.objects.filter(pk=geo_area_pk).first()
@@ -101,6 +106,7 @@ def import_species_checklist(category_pk, dyntaxa_taxon_ids):
     category = SpeciesCategory.objects.get(pk=category_pk)
     registered_species_pks = []
     failed_taxon_ids = []
+    skipped_without_swedish_name = []
 
     with defer_species_phenograms():
         for taxon_id in dyntaxa_taxon_ids:
@@ -124,19 +130,24 @@ def import_species_checklist(category_pk, dyntaxa_taxon_ids):
                     exc,
                 )
             else:
-                registered_species_pks.append(str(species.pk))
+                if species is None:
+                    skipped_without_swedish_name.append(taxon_id)
+                else:
+                    registered_species_pks.append(str(species.pk))
 
     for species_pk in registered_species_pks:
         fan_out_species_phenograms.enqueue(species_pk)
 
     logger.info(
-        "import_species_checklist(%s): registered %d, failed %d; phenograms queued",
+        "import_species_checklist(%s): registered %d, skipped without Swedish name %d, failed %d; phenograms queued",
         category_pk,
         len(registered_species_pks),
+        len(skipped_without_swedish_name),
         len(failed_taxon_ids),
     )
     return {
         "registered": len(registered_species_pks),
+        "skipped_without_swedish_name": skipped_without_swedish_name,
         "failed": failed_taxon_ids,
         "phenograms_scheduled": len(registered_species_pks),
     }
@@ -179,7 +190,7 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
     from tempus.models import GeoArea, PhenogramGeneration, Species
 
     species = Species.objects.filter(pk=species_pk).first()
-    if species is None:
+    if species is None or not _has_swedish_name(species):
         return
     geo_area = (
         GeoArea.objects.filter(pk=geo_area_pk).first()
@@ -238,7 +249,8 @@ def fan_out_species_phenograms(species_pk, *, refresh=True):
     """Enqueue :func:`generate_phenogram` for this species across every GeoArea."""
     from tempus.models import GeoArea, Species
 
-    if not Species.objects.filter(pk=species_pk).exists():
+    species = Species.objects.filter(pk=species_pk).first()
+    if species is None or not _has_swedish_name(species):
         return
     area_pks = [str(pk) for pk in GeoArea.objects.values_list("pk", flat=True)]
     queued = 0
@@ -260,7 +272,11 @@ def fan_out_area_phenograms(geo_area_pk, *, refresh=True):
 
     if not GeoArea.objects.filter(pk=geo_area_pk).exists():
         return
-    species_pks = [str(pk) for pk in Species.objects.values_list("pk", flat=True)]
+    species_pks = [
+        str(species.pk)
+        for species in Species.objects.only("pk", "swedish_name")
+        if _has_swedish_name(species)
+    ]
     queued = 0
     for species_pk in species_pks:
         _, created = enqueue_phenogram_generation(

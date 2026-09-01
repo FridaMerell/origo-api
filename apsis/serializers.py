@@ -4,7 +4,6 @@ import apsis.models as models
 
 class PostSerializer(serializers.ModelSerializer):
     author = serializers.PrimaryKeyRelatedField(read_only=True)
-    files = serializers.JSONField(write_only=True, required=False)
 
     class Meta:
         model = models.Post

@@ -1,0 +1,40 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .origo-admin-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .origo-admin-card { border: 1px solid var(--hairline-color); border-radius: 8px; overflow: hidden; background: var(--body-bg); }
+  .origo-admin-card h2 { margin: 0; padding: 14px 16px; font-size: 1rem; background: var(--darkened-bg); }
+  .origo-admin-card ul { margin: 0; padding: 8px 0; list-style: none; }
+  .origo-admin-card li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 16px; }
+  .origo-admin-card li:hover { background: var(--selected-bg); }
+  .origo-admin-card a { text-decoration: none; }
+  .origo-admin-card .addlink { color: var(--link-fg); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% if app_list %}
+  <div class="origo-admin-grid">
+    {% for app in app_list %}
+    <section class="origo-admin-card">
+      <h2>{{ app.name }}</h2>
+      <ul>
+        {% for model in app.models %}
+        <li>
+          {% if model.admin_url %}<a href="{{ model.admin_url }}">{{ model.name }}</a>{% else %}{{ model.name }}{% endif %}
+          {% if model.add_url %}<a class="addlink" href="{{ model.add_url }}">{% translate 'Lägg till' %}</a>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>{% translate 'Du har inte behörighet att visa eller ändra något.' %}</p>
+  {% endif %}
+</div>
+{% endblock %}

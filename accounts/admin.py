@@ -6,11 +6,12 @@ from django.template.response import TemplateResponse
 from django.utils import timezone
 
 from accounts.models import CodexToken, Notification, User
+from origo.admin import site
 
-admin.site.register(User, UserAdmin)
+site.register(User, UserAdmin)
 
 
-@admin.register(Notification)
+@admin.register(Notification, site=site)
 class NotificationAdmin(admin.ModelAdmin):
     list_display = ['user', 'domain', 'message', 'is_read', 'created_at', 'sent_by']
     list_filter = ['domain', 'is_read']
@@ -23,7 +24,7 @@ class CodexTokenIssueForm(forms.Form):
     expires_at = forms.DateTimeField(required=False)
 
 
-@admin.register(CodexToken)
+@admin.register(CodexToken, site=site)
 class CodexTokenAdmin(admin.ModelAdmin):
     list_display = ['label', 'user', 'created_at', 'expires_at', 'revoked_at', 'last_used_at']
     list_filter = ['expires_at', 'revoked_at']
