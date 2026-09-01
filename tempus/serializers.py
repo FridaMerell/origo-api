@@ -4,6 +4,16 @@ import io
 from django.utils import timezone
 from rest_framework import serializers
 
+from tempus.api.category_serializers import (
+    SpeciesCategoryListSerializer,
+    SpeciesCategoryMembershipSerializer,
+    SpeciesCategorySerializer,
+)
+from tempus.api.reference_serializers import (
+    GeoAreaSerializer,
+    PhenophaseSerializer,
+    SourceSerializer,
+)
 from tempus.models import (
     BirdnetDevice,
     BirdnetDetection,
@@ -97,85 +107,6 @@ class SpeciesResolveRequestSerializer(serializers.Serializer):
         if len(value) != len(set(value)):
             raise serializers.ValidationError("Species ids must be unique.")
         return value
-
-
-class SpeciesCategoryMembershipSerializer(serializers.ModelSerializer):
-    species = serializers.UUIDField(source="species_id", read_only=True)
-
-    class Meta:
-        model = SpeciesCategoryMembership
-        fields = ["id", "species"]
-        read_only_fields = ["id", "species"]
-
-
-class SpeciesCategorySerializer(serializers.ModelSerializer):
-    parent_category = serializers.PrimaryKeyRelatedField(read_only=True)
-    is_primary = serializers.BooleanField(required=False)
-    species = serializers.SerializerMethodField()
-    species_memberships = SpeciesCategoryMembershipSerializer(
-        source="memberships",
-        many=True,
-        read_only=True,
-    )
-    species_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = SpeciesCategory
-        fields = [
-            "id",
-            "parent_category",
-            "is_primary",
-            "taxon",
-            "label",
-            "image_url",
-            "species",
-            "species_memberships",
-            "species_count",
-            "taxon_id",
-        ]
-        read_only_fields = ["id", "species", "species_memberships", "species_count"]
-
-    def get_species_count(self, obj):
-        return len(self._effective_species_ids(obj))
-
-    def get_species(self, obj):
-        return [str(pk) for pk in self._effective_species_ids(obj)]
-
-    @staticmethod
-    def _effective_species_ids(obj):
-        if not hasattr(obj, "_serializer_effective_species_ids"):
-            obj._serializer_effective_species_ids = obj.effective_species_ids()
-        return obj._serializer_effective_species_ids
-
-    def validate_parent_category(self, parent_category):
-        if parent_category is None or self.instance is None:
-            return parent_category
-        ancestor = parent_category
-        while ancestor is not None:
-            if ancestor.pk == self.instance.pk:
-                raise serializers.ValidationError(
-                    "This would create a circular category chain."
-                )
-            ancestor = ancestor.parent_category
-        return parent_category
-
-
-class SpeciesCategoryListSerializer(serializers.ModelSerializer):
-    """Small category-navigation representation for paginated lists."""
-
-    parent_category = serializers.PrimaryKeyRelatedField(read_only=True)
-
-    class Meta:
-        model = SpeciesCategory
-        fields = [
-            "id",
-            "parent_category",
-            "is_primary",
-            "label",
-            "image_url",
-            "taxon_id",
-        ]
-        read_only_fields = ["id"]
 
 
 class RegisterSpeciesSerializer(serializers.Serializer):
@@ -534,30 +465,6 @@ class SpeciesFollowSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "user", "created_at"]
-
-
-class PhenophaseSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Phenophase
-        fields = ["id", "code", "label"]
-        read_only_fields = ["id"]
-
-
-class SourceSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Source
-        fields = ["id", "title", "url", "publisher", "accessed_at"]
-        read_only_fields = ["id"]
-
-
-class GeoAreaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = GeoArea
-        fields = ["id", "name", "kind", "country_code", "geometry"]
-        read_only_fields = ["id"]
-
-    def validate_geometry(self, value):
-        return validate_geojson(value, "MultiPolygon")
 
 
 class RouteSerializer(serializers.ModelSerializer):

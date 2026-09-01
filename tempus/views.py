@@ -28,6 +28,9 @@ from rest_framework.views import APIView
 
 from origo.pagination import StandardPagination
 from tempus import tasks
+from tempus.api.category_views import SpeciesCategoryViewSet
+from tempus.api.common import SharedDataPermission, SharedDataViewSet
+from tempus.api.reference_views import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet
 from tempus.services import (
     artdatabanken,
     checklists,
@@ -93,21 +96,6 @@ def _is_true(value):
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-class SharedDataPermission(permissions.BasePermission):
-    """Allow authenticated reads and restrict shared-data writes to staff."""
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and (request.method in permissions.SAFE_METHODS or request.user.is_staff)
-        )
-
-
-class SharedDataViewSet(viewsets.ModelViewSet):
-    permission_classes = [SharedDataPermission]
-
-
 class SpeciesFilter(FilterSet):
     category = NumberFilter(field_name="categories__taxon_id")
     categories__taxon_id = NumberFilter(field_name="categories__taxon_id")
@@ -134,6 +122,10 @@ class ObservationFilter(FilterSet):
 
 
 class SpeciesViewSet(SharedDataViewSet):
+    # Cap on followed species shown when no status filter is given, so an
+    # active watcher's out-of-season follows don't crowd the overview.
+    MAX_FOLLOWED_WITHOUT_STATUS = 15
+
     queryset = Species.objects.all()
     serializer_class = SpeciesSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
@@ -193,7 +185,10 @@ class SpeciesViewSet(SharedDataViewSet):
             queryset = queryset.filter(is_followed=opts["is_followed"])
 
         wanted = opts["status"]
-        if opts.get("is_followed") and "status" not in request.query_params:
+        widened_for_followed = (
+            opts.get("is_followed") and "status" not in request.query_params
+        )
+        if widened_for_followed:
             wanted = [
                 "at_peak",
                 "in_season",
@@ -235,6 +230,8 @@ class SpeciesViewSet(SharedDataViewSet):
                 row.species.scientific_name.casefold(),
             )
         )
+        if widened_for_followed:
+            matches = matches[: self.MAX_FOLLOWED_WITHOUT_STATUS]
 
         page = self.paginate_queryset(matches)
         serializer = SeasonalOverviewSerializer(page, many=True)
@@ -462,56 +459,6 @@ class SpeciesViewSet(SharedDataViewSet):
             {"detail": "Phenogram generation queued.", "species": len(pks)},
             status=status.HTTP_202_ACCEPTED,
         )
-
-
-class SpeciesCategoryViewSet(SharedDataViewSet):
-    queryset = SpeciesCategory.objects.all()
-    serializer_class = SpeciesCategorySerializer
-    pagination_class = StandardPagination
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["taxon_id", "parent_category", "is_primary"]
-    ordering_fields = [
-        "taxon_id",
-        "label",
-        "parent_category",
-        "parent_category__label",
-        "is_primary",
-    ]
-    ordering = ["taxon_id", "label"]
-    lookup_field = "taxon_id"
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        if self.action == "retrieve":
-            return queryset.prefetch_related("taxon", "memberships", "children")
-        return queryset
-
-    def get_serializer_class(self):
-        if self.action == "list":
-            return SpeciesCategoryListSerializer
-        return super().get_serializer_class()
-
-
-class PhenophaseViewSet(SharedDataViewSet):
-    queryset = Phenophase.objects.all()
-    serializer_class = PhenophaseSerializer
-    filterset_fields = ["code"]
-
-
-class SourceViewSet(SharedDataViewSet):
-    queryset = Source.objects.all()
-    serializer_class = SourceSerializer
-
-
-class GeoAreaViewSet(SharedDataViewSet):
-    queryset = GeoArea.objects.all()
-    serializer_class = GeoAreaSerializer
-    filterset_fields = ["kind", "country_code"]
-
-    def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        response["Cache-Control"] = "private, max-age=3600"
-        return response
 
 
 class PhenogramViewSet(viewsets.ReadOnlyModelViewSet):

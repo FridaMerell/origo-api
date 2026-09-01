@@ -9,6 +9,8 @@ This directory is the entry point for feature and integration documentation.
   - [Phenograms](tempus/phenograms.md)
   - [Routes](tempus/routes.md)
   - [Artdatabanken and Artportalen](tempus/artdatabanken/README.md)
+- Accounts
+  - [Inbjudningar (hus + projekt)](accounts/invitations.md)
 
 ## Documentation rules
 

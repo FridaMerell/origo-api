@@ -271,6 +271,7 @@ MAILERS = {
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -334,6 +335,14 @@ if DEBUG:
     DEFAULT_FRONTEND_ORIGINS += _frontend_origins(
         schemes=('http', 'https'), ports=FRONTEND_DEV_PORTS,
     )
+    # A frontend served straight from the root domain (e.g. the dev chat on
+    # http://origo.test:3000) rather than a <sub>.<domain> host.
+    DEFAULT_FRONTEND_ORIGINS += [
+        f'{scheme}://{domain}:{port}'
+        for domain in DOMAINS
+        for scheme in ('http', 'https')
+        for port in FRONTEND_DEV_PORTS
+    ]
 
 CORS_ALLOWED_ORIGINS = (
     _explicit_origins('CORS_ALLOWED_ORIGINS') or DEFAULT_FRONTEND_ORIGINS
