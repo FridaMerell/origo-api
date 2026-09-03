@@ -2,12 +2,12 @@ import json
 import logging
 import time
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 from django.db import close_old_connections, connection
-from django.db.models import Exists, OuterRef, Q, Subquery
+from django.db.models import Case, Exists, F, IntegerField, OuterRef, Q, Subquery, Value, When
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -95,6 +95,26 @@ logger = logging.getLogger(__name__)
 def _is_true(value):
     """Truthiness for a query-string flag (``?sync=true``, ``?refresh=1``)."""
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _day_of_year_in_span(start_field, end_field, day):
+    """A ``Q`` expression for an inclusive day-of-year span that may wrap."""
+    return (
+        Q(**{f"{start_field}__lte": F(end_field)})
+        & Q(**{f"{start_field}__lte": day})
+        & Q(**{f"{end_field}__gte": day})
+    ) | (
+        Q(**{f"{start_field}__gt": F(end_field)})
+        & (Q(**{f"{start_field}__lte": day}) | Q(**{f"{end_field}__gte": day}))
+    )
+
+
+def _day_of_year_within(field, day, days):
+    """A ``Q`` expression for a date-field value within ``days`` days ahead."""
+    end = day + days
+    if end <= 366:
+        return Q(**{f"{field}__gte": day, f"{field}__lte": end})
+    return Q(**{f"{field}__gte": day}) | Q(**{f"{field}__lte": end - 366})
 
 
 class SpeciesFilter(FilterSet):
@@ -210,7 +230,17 @@ class SpeciesViewSet(SharedDataViewSet):
         followed = SpeciesFollow.objects.filter(
             species_id=OuterRef("species_id"), user=request.user
         )
-        queryset = Phenogram.objects.filter(years=phenogram.DEFAULT_YEARS)
+        queryset = (
+            Phenogram.objects.filter(years=phenogram.DEFAULT_YEARS)
+            .select_related("species")
+            # The overview only needs the condensed seasonal envelope. Avoid
+            # fetching every 52-week curve and provenance payload while
+            # evaluating all candidate rows before pagination.
+            .defer("weeks", "significance_basis", "species__api_data")
+            # Phenogram's default ordering is -computed_at, but this action
+            # applies its own relevance ordering below.
+            .order_by()
+        )
         # No area selected ("whole Sweden") -> only the whole-range curves
         # exist to show; a selected area also falls back to those.
         queryset = queryset.filter(
@@ -218,9 +248,7 @@ class SpeciesViewSet(SharedDataViewSet):
             if geo_area is not None
             else Q(geo_area__isnull=True)
         )
-        queryset = queryset.select_related("species").annotate(
-            is_followed=Exists(followed)
-        )
+        queryset = queryset.annotate(is_followed=Exists(followed))
         if "is_followed" in opts:
             queryset = queryset.filter(is_followed=opts["is_followed"])
 
@@ -236,44 +264,83 @@ class SpeciesViewSet(SharedDataViewSet):
                 "going_out_of_season",
                 "out_of_season",
             ]
+        today = date.today().timetuple().tm_yday
+        in_season = _day_of_year_in_span(
+            "start_day_of_year", "end_day_of_year", today
+        )
+        at_peak = (
+            Q(peak_start_day__isnull=False, peak_end_day__isnull=False)
+            & _day_of_year_in_span("peak_start_day", "peak_end_day", today)
+        )
+        coming_into_season = ~in_season & _day_of_year_within(
+            "start_day_of_year", today, 21
+        )
+        going_out_of_season = in_season & _day_of_year_within(
+            "end_day_of_year", today, 14
+        )
+        status_conditions = {
+            "at_peak": at_peak,
+            "in_season": in_season,
+            "coming_into_season": coming_into_season,
+            "going_out_of_season": going_out_of_season,
+            "out_of_season": ~in_season & ~coming_into_season,
+        }
+
         # One card per species. A local curve always beats the whole-range
         # fallback, even if the fallback has more records.
-        selected = {}
-        for row in queryset:
-            is_local = geo_area is not None and row.geo_area_id == geo_area.pk
-            previous = selected.get(row.species_id)
-            if previous is None or is_local:
-                row._phenogram_scope = "selected_area" if is_local else "whole_range"
-                selected[row.species_id] = row
-
-        matches = []
-        for row in selected.values():
-            row._seasonal_status = season.status_for(row)
-            matching_statuses = [
-                index
-                for index, item in enumerate(wanted)
-                if season.matches_status(row, item)
-            ]
-            if matching_statuses:
-                row._seasonal_rank = matching_statuses[0]
-                row._is_low_confidence = row.record_count < opts["min_records"]
-                matches.append(row)
-
-        matches.sort(
-            key=lambda row: (
-                not row.is_followed,
-                row._seasonal_rank,
-                row._phenogram_scope != "selected_area",
-                row._is_low_confidence,
-                -row.record_count,
-                row.species.swedish_name.casefold(),
-                row.species.scientific_name.casefold(),
+        if geo_area is not None:
+            local_curve_exists = Phenogram.objects.filter(
+                species_id=OuterRef("species_id"),
+                geo_area=geo_area,
+                years=phenogram.DEFAULT_YEARS,
             )
+            queryset = queryset.annotate(
+                has_local_curve=Exists(local_curve_exists),
+                scope_rank=Case(
+                    When(geo_area=geo_area, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                ),
+            ).filter(Q(geo_area=geo_area) | Q(geo_area__isnull=True, has_local_curve=False))
+        else:
+            queryset = queryset.annotate(
+                scope_rank=Value(1, output_field=IntegerField())
+            )
+
+        queryset = queryset.annotate(
+            seasonal_rank=Case(
+                *[
+                    When(status_conditions[item], then=Value(index))
+                    for index, item in enumerate(wanted)
+                ],
+                default=Value(len(wanted)),
+                output_field=IntegerField(),
+            ),
+            low_confidence_rank=Case(
+                When(record_count__lt=opts["min_records"], then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            ),
+        ).filter(seasonal_rank__lt=len(wanted))
+        queryset = queryset.order_by(
+            "-is_followed",
+            "seasonal_rank",
+            "scope_rank",
+            "low_confidence_rank",
+            "-record_count",
+            "species__swedish_name",
+            "species__scientific_name",
         )
         if widened_for_followed:
-            matches = matches[: self.MAX_FOLLOWED_WITHOUT_STATUS]
-
-        page = self.paginate_queryset(matches)
+            queryset = queryset[: self.MAX_FOLLOWED_WITHOUT_STATUS]
+        page = self.paginate_queryset(queryset)
+        for row in page:
+            row._phenogram_scope = (
+                "selected_area" if geo_area is not None and row.geo_area_id == geo_area.pk
+                else "whole_range"
+            )
+            row._is_low_confidence = row.record_count < opts["min_records"]
+            row._seasonal_status = season.status_for(row)
         serializer = SeasonalOverviewSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)
 
