@@ -33,6 +33,12 @@ ROUTE = {
     "coordinates": [[18.0649, 59.3293], [17.6389, 59.8586]],  # Sthlm -> Uppsala
 }
 
+SHORT_ROUTE = {
+    "type": "LineString",
+    # About 15 km, with a good site just over 2 km from the start.
+    "coordinates": [[18.0649, 59.3293], [18.0649, 59.4642]],
+}
+
 # Live SOS TaxonAggregation shape: flat taxonId + observationCount, no names.
 _TAXON_AGG = {"skip": 0, "take": 50, "totalCount": 4, "records": [
     {"taxonId": CROW, "observationCount": 900, "lastSighting": "2026-06-14T09:00:00+02:00"},
@@ -136,7 +142,7 @@ class _MultiSiteSession:
     dedup / edge-buffer behaviour can be exercised."""
 
     _BANDS = [
-        (59.40, "Startnära", 59.35, 18.03),
+        (59.40, "Startnära", 59.335, 18.03),
         (59.52, "Mitten A", 59.47, 17.95),
         (59.66, "Mitten B", 59.60, 17.82),
         (99.0, "Slutnära", 59.82, 17.68),
@@ -261,6 +267,16 @@ class SuggestRestStopsTests(SimpleTestCase):
         self.assertNotIn("Startnära", names)
         self.assertNotIn("Slutnära", names)
         self.assertTrue(names)  # the middle sites survive
+
+    def test_short_route_keeps_sites_near_its_start(self):
+        session = _MultiSiteSession()
+        self.enterContext(_patch(adb, "_session", lambda: session))
+        stops = route_planner.suggest_rest_stops(
+            SHORT_ROUTE, 2_000, num_stops=3, today=TODAY,
+            significance_of=_significance_of,
+        )
+
+        self.assertIn("Startnära", {stop["locality"] for stop in stops})
 
     def test_stops_respect_minimum_spacing(self):
         stops = self._run_multisite(num_stops=5, edge_buffer_m=500, min_gap_m=25_000)

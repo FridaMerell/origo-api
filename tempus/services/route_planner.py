@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 _MAX_SAMPLES = 40
 _COARSE_KEEP_FACTOR = 2      # keep 2x num_stops after the coarse pass
 _SEARCH_TAKE = 500          # records pulled per winner to cluster into sites
+# Route geometry does not include an estimated driving time. Treat 150 km as
+# the practical equivalent of a 2.5-hour trip when deciding whether a detour
+# stop near either endpoint is useful.
+_SHORT_TRIP_NO_EDGE_BUFFER_M = 150_000
 # A candidate site needs at least this many distinct taxa reported recently -
 # below it the "locality" is usually a garden feeder or a street address.
 _MIN_SITE_TAXA = 6
@@ -209,7 +213,13 @@ def suggest_rest_stops(
     date = _date_filter(since_days, today=today)
 
     if edge_buffer_m is None:
-        edge_buffer_m = max(2 * corridor_metres, 0.05 * total_m)
+        # On a short trip, a good site close to the start or destination can
+        # still be worth a deliberate detour. Longer trips retain a small
+        # endpoint buffer so suggested rest stops do not duplicate the ends.
+        edge_buffer_m = (
+            0.0 if total_m < _SHORT_TRIP_NO_EDGE_BUFFER_M
+            else max(corridor_metres, 0.025 * total_m)
+        )
     edge_buffer_m = min(edge_buffer_m, 0.4 * total_m)  # never exclude the whole route
     if min_gap_m is None:
         min_gap_m = max(corridor_metres, 0.5 * total_m / max(num_stops, 1))
@@ -231,6 +241,12 @@ def suggest_rest_stops(
         if not rows:
             continue
         result = diversity.score(rows)
+        along = geo.distance_along_line(coords, (lon, lat))
+        # Do this before the coarse ranking. Otherwise endpoint candidates can
+        # occupy every winner slot, only to be discarded after localisation,
+        # leaving no interior sites to consider.
+        if along < edge_buffer_m or along > total_m - edge_buffer_m:
+            continue
         scored.append({"lon": lon, "lat": lat, "result": result, "rows": rows})
 
     if not scored:
@@ -517,5 +533,3 @@ def _localise(sample, coords, corridor_metres, taxon_id, date, notable_days,
         "notable_recent": notable_recent[:10],
         "top_species": top_species,
     }
-
-

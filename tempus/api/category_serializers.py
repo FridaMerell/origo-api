@@ -112,7 +112,14 @@ class SpeciesCategoryListSerializer(serializers.ModelSerializer):
     """Small category-navigation representation for paginated lists."""
 
     parent_category = serializers.PrimaryKeyRelatedField(read_only=True)
+    species = serializers.SerializerMethodField()
     species_count = serializers.SerializerMethodField()
+
+    def get_species(self, obj):
+        return sorted(
+            str(species_id)
+            for species_id in getattr(obj, "_serializer_effective_species_ids", ())
+        )
 
     def get_species_count(self, obj):
         return len(getattr(obj, "_serializer_effective_species_ids", ()))
@@ -126,7 +133,8 @@ class SpeciesCategoryListSerializer(serializers.ModelSerializer):
             "is_primary",
             "label",
             "image_url",
+            "species",
             "species_count",
             "taxon_id",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "species", "species_count"]
