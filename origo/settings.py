@@ -210,14 +210,13 @@ else:
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
+redis_url = os.environ.get('REDIS_URL')
 
-cache_url = os.environ.get('CACHE_URL')
-
-if cache_url:
+if redis_url:
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': cache_url,
+            'LOCATION': redis_url,
             'KEY_PREFIX': 'origo',
             'TIMEOUT': 300,
         }
