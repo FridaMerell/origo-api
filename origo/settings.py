@@ -27,7 +27,7 @@ try:
 except ImportError:
     pass
 else:
-    load_dotenv(BASE_DIR / '.env')
+    load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
@@ -35,10 +35,10 @@ else:
 
 # Debugging and secrets must always be configured explicitly. Failing fast is
 # safer than accidentally starting a production process with a known key.
-DEBUG = os.environ.get('DEBUG', 'False').strip().lower() == 'true'
-SECRET_KEY = os.environ.get('SECRET_KEY')
+DEBUG = os.environ.get("DEBUG", "False").strip().lower() == "true"
+SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
-    raise ImproperlyConfigured('SECRET_KEY must be set.')
+    raise ImproperlyConfigured("SECRET_KEY must be set.")
 
 # ---------------------------------------------------------------------------
 # Domains
@@ -56,81 +56,81 @@ if not SECRET_KEY:
 # Punycode (xn--...) domains work here as-is; use the encoded form.
 
 DOMAINS = [
-    d.strip()
-    for d in os.environ.get('DOMAINS', 'origo.test').split(',')
-    if d.strip()
+    d.strip() for d in os.environ.get("DOMAINS", "origo.test").split(",") if d.strip()
 ]
 
 FRONTEND_SUBDOMAINS = [
     s.strip()
-    for s in os.environ.get('FRONTEND_SUBDOMAINS', 'flux,verso,apsis').split(',')
+    for s in os.environ.get("FRONTEND_SUBDOMAINS", "flux,verso,apsis").split(",")
     if s.strip()
 ]
 
-API_SUBDOMAIN = os.environ.get('API_SUBDOMAIN', 'origo.api')
+API_SUBDOMAIN = os.environ.get("API_SUBDOMAIN", "origo.api")
 
 # Ports the Next.js frontends run on in local development (for CSRF only).
 FRONTEND_DEV_PORTS = [
     p.strip()
-    for p in os.environ.get('FRONTEND_DEV_PORTS', '3000').split(',')
+    for p in os.environ.get("FRONTEND_DEV_PORTS", "3000").split(",")
     if p.strip()
 ]
 
 
-def _frontend_origins(schemes=('https',), ports=(None,)):
+def _frontend_origins(schemes=("https",), ports=(None,)):
     """Build <scheme>://<sub>.<domain>[:port] for every frontend subdomain."""
     origins = []
     for domain in DOMAINS:
         for sub in FRONTEND_SUBDOMAINS:
             for scheme in schemes:
                 for port in ports:
-                    host = f'{sub}.{domain}'
+                    host = f"{sub}.{domain}"
                     origins.append(
-                        f'{scheme}://{host}:{port}' if port else f'{scheme}://{host}'
+                        f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
                     )
     return origins
 
 
 # An explicit ALLOWED_HOSTS env var still wins; otherwise allow every domain
 # and all of its subdomains.
-if os.environ.get('ALLOWED_HOSTS'):
-    ALLOWED_HOSTS = [h.strip() for h in os.environ['ALLOWED_HOSTS'].split(',') if h.strip()]
+if os.environ.get("ALLOWED_HOSTS"):
+    ALLOWED_HOSTS = [
+        h.strip() for h in os.environ["ALLOWED_HOSTS"].split(",") if h.strip()
+    ]
 else:
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
     for domain in DOMAINS:
-        ALLOWED_HOSTS += [domain, f'.{domain}']
+        ALLOWED_HOSTS += [domain, f".{domain}"]
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'rest_framework',
-    'rest_framework.authtoken',
-    'django_filters',
-    'django_tasks',
-    'django_tasks_db',
-    'corsheaders',
-    'accounts',
-    'flux',
-    'verso',
-    'apsis',
-    'tempus'
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "rest_framework.authtoken",
+    "django_filters",
+    "django_tasks",
+    "django_tasks_db",
+    "corsheaders",
+    "accounts",
+    "flux",
+    "verso",
+    "apsis",
+    "tempus",
 ]
 
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_REFERRER_POLICY = 'same-origin'
+SECURE_REFERRER_POLICY = "same-origin"
 
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
@@ -138,37 +138,37 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-AUTH_USER_MODEL = 'accounts.User'
+AUTH_USER_MODEL = "accounts.User"
 
-ROOT_URLCONF = 'origo.urls'
+ROOT_URLCONF = "origo.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'origo' / 'templates'],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "origo" / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'origo.wsgi.application'
+WSGI_APPLICATION = "origo.wsgi.application"
 
 
 # Database
@@ -176,38 +176,38 @@ WSGI_APPLICATION = 'origo.wsgi.application'
 # DATABASE_URL unset -> local SQLite. A PostgreSQL URL is parsed with the
 # standard library so database configuration has no third-party dependency.
 
-database_url = os.environ.get('DATABASE_URL')
+database_url = os.environ.get("DATABASE_URL")
 
 if database_url:
     parsed_database_url = urlparse(database_url)
-    if parsed_database_url.scheme not in ('postgres', 'postgresql'):
-        raise ValueError('DATABASE_URL must use the postgres or postgresql scheme.')
+    if parsed_database_url.scheme not in ("postgres", "postgresql"):
+        raise ValueError("DATABASE_URL must use the postgres or postgresql scheme.")
 
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': unquote(parsed_database_url.path.lstrip('/')),
-            'USER': unquote(parsed_database_url.username or ''),
-            'PASSWORD': unquote(parsed_database_url.password or ''),
-            'HOST': parsed_database_url.hostname or '',
-            'PORT': parsed_database_url.port or '',
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": unquote(parsed_database_url.path.lstrip("/")),
+            "USER": unquote(parsed_database_url.username or ""),
+            "PASSWORD": unquote(parsed_database_url.password or ""),
+            "HOST": parsed_database_url.hostname or "",
+            "PORT": parsed_database_url.port or "",
             # The threaded Django development server creates a new request
             # thread frequently; retaining a connection for ten minutes per
             # thread can exhaust a small remote PostgreSQL instance even for
             # one user. Keep local connections request-scoped, while allowing
             # production to opt into a bounded lifetime.
-            'CONN_MAX_AGE': int(
-                os.environ.get('DB_CONN_MAX_AGE', '0' if DEBUG else '60')
+            "CONN_MAX_AGE": int(
+                os.environ.get("DB_CONN_MAX_AGE", "0" if DEBUG else "60")
             ),
-            'CONN_HEALTH_CHECKS': True,
-            'OPTIONS': dict(parse_qsl(parsed_database_url.query)),
+            "CONN_HEALTH_CHECKS": True,
+            "OPTIONS": dict(parse_qsl(parsed_database_url.query)),
         }
     }
 else:
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
         }
     }
 
@@ -234,16 +234,16 @@ else:
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -251,9 +251,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -263,11 +263,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
-    'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
 
@@ -276,8 +276,8 @@ STORAGES = {
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
 MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+    "default": {
+        "BACKEND": "django.core.mail.backends.console.EmailBackend",
     },
 }
 
@@ -286,15 +286,15 @@ MAILERS = {
 # https://www.django-rest-framework.org/api-guide/settings/
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+        "rest_framework.authentication.TokenAuthentication",
     ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
     ],
-    'DEFAULT_FILTER_BACKENDS': [
-        'django_filters.rest_framework.DjangoFilterBackend',
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
     ],
 }
 
@@ -307,10 +307,10 @@ REST_FRAMEWORK = {
 # backend.
 
 TASKS = {
-    'default': {
-        'BACKEND': os.environ.get(
-            'TASKS_BACKEND',
-            'django_tasks_db.DatabaseBackend',
+    "default": {
+        "BACKEND": os.environ.get(
+            "TASKS_BACKEND",
+            "django_tasks_db.DatabaseBackend",
         ),
     }
 }
@@ -323,10 +323,10 @@ TASKS = {
 # to the first entry in DOMAINS. Override via the ROOT_DOMAIN env var if the
 # primary domain is not listed first.
 
-ROOT_DOMAIN = os.environ.get('ROOT_DOMAIN', DOMAINS[0])
+ROOT_DOMAIN = os.environ.get("ROOT_DOMAIN", DOMAINS[0])
 
-SESSION_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
-CSRF_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
+SESSION_COOKIE_DOMAIN = f".{ROOT_DOMAIN}"
+CSRF_COOKIE_DOMAIN = f".{ROOT_DOMAIN}"
 
 
 # CORS
@@ -336,42 +336,42 @@ CSRF_COOKIE_DOMAIN = f'.{ROOT_DOMAIN}'
 # named: a wildcard would allow any controlled or accidentally taken-over
 # subdomain to make authenticated cross-origin requests.
 
+
 def _explicit_origins(name):
     origins = [
         origin.strip()
-        for origin in os.environ.get(name, '').split(',')
+        for origin in os.environ.get(name, "").split(",")
         if origin.strip()
     ]
-    if any('*' in origin for origin in origins):
-        raise ImproperlyConfigured(f'{name} must not contain wildcard origins.')
+    if any("*" in origin for origin in origins):
+        raise ImproperlyConfigured(f"{name} must not contain wildcard origins.")
     return origins
 
 
-DEFAULT_FRONTEND_ORIGINS = _frontend_origins(schemes=('https',)) + [
-    f'https://{domain}' for domain in DOMAINS
+DEFAULT_FRONTEND_ORIGINS = _frontend_origins(schemes=("https",)) + [
+    f"https://{domain}" for domain in DOMAINS
 ]
 if DEBUG:
     DEFAULT_FRONTEND_ORIGINS += _frontend_origins(
-        schemes=('http', 'https'), ports=FRONTEND_DEV_PORTS,
+        schemes=("http", "https"),
+        ports=FRONTEND_DEV_PORTS,
     )
     # A frontend served straight from the root domain (e.g. the dev chat on
     # http://origo.test:3000) rather than a <sub>.<domain> host.
     DEFAULT_FRONTEND_ORIGINS += [
-        f'{scheme}://{domain}:{port}'
+        f"{scheme}://{domain}:{port}"
         for domain in DOMAINS
-        for scheme in ('http', 'https')
+        for scheme in ("http", "https")
         for port in FRONTEND_DEV_PORTS
     ]
 
 CORS_ALLOWED_ORIGINS = (
-    _explicit_origins('CORS_ALLOWED_ORIGINS') or DEFAULT_FRONTEND_ORIGINS
+    _explicit_origins("CORS_ALLOWED_ORIGINS") or DEFAULT_FRONTEND_ORIGINS
 )
 
 CORS_ALLOW_CREDENTIALS = True
 
-CSRF_TRUSTED_ORIGINS = (
-    _explicit_origins('CSRF_TRUSTED_ORIGINS') or CORS_ALLOWED_ORIGINS
-)
+CSRF_TRUSTED_ORIGINS = _explicit_origins("CSRF_TRUSTED_ORIGINS") or CORS_ALLOWED_ORIGINS
 
 
 # ---------------------------------------------------------------------------
@@ -384,47 +384,41 @@ CSRF_TRUSTED_ORIGINS = (
 # tempus/services/artdatabanken.py and .claude/skills/artdatabanken-api/.
 
 ARTDATABANKEN = {
-    'SPECIES_OBSERVATION_URL': os.environ.get(
-        'ARTDATABANKEN_SPECIES_OBSERVATION_URL',
-        'https://api.artdatabanken.se/species-observation-system/v1',
+    "SPECIES_OBSERVATION_URL": os.environ.get(
+        "ARTDATABANKEN_SPECIES_OBSERVATION_URL",
+        "https://api.artdatabanken.se/species-observation-system/v1",
     ),
-    'TAXON_SERVICE_URL': os.environ.get(
-        'ARTDATABANKEN_TAXON_SERVICE_URL',
-        'https://api.artdatabanken.se/taxonservice/v1',
+    "TAXON_SERVICE_URL": os.environ.get(
+        "ARTDATABANKEN_TAXON_SERVICE_URL",
+        "https://api.artdatabanken.se/taxonservice/v1",
     ),
-    'SPECIES_INFORMATION_URL': os.environ.get(
-        'ARTDATABANKEN_SPECIES_INFORMATION_URL',
-        'https://api.artdatabanken.se/information/v1',
+    "SPECIES_INFORMATION_URL": os.environ.get(
+        "ARTDATABANKEN_SPECIES_INFORMATION_URL",
+        "https://api.artdatabanken.se/information/v1",
     ),
-    'SUBSCRIPTION_KEY_SOS': os.environ.get('ARTDATABANKEN_SUBSCRIPTION_KEY_SOS'),
-    'SUBSCRIPTION_KEY_TAXON': os.environ.get('ARTDATABANKEN_SUBSCRIPTION_KEY_TAXON'),
-    'SUBSCRIPTION_KEY_SPECIES_INFORMATION': os.environ.get(
-        'ARTDATABANKEN_SUBSCRIPTION_KEY_SPECIES_INFORMATION'
+    "SUBSCRIPTION_KEY_SOS": os.environ.get("ARTDATABANKEN_SUBSCRIPTION_KEY_SOS"),
+    "SUBSCRIPTION_KEY_TAXON": os.environ.get("ARTDATABANKEN_SUBSCRIPTION_KEY_TAXON"),
+    "SUBSCRIPTION_KEY_SPECIES_INFORMATION": os.environ.get(
+        "ARTDATABANKEN_SUBSCRIPTION_KEY_SPECIES_INFORMATION"
     ),
-    'TIMEOUT': float(os.environ.get('ARTDATABANKEN_TIMEOUT', '30')),
+    "TIMEOUT": float(os.environ.get("ARTDATABANKEN_TIMEOUT", "30")),
     # SOS observation pages used to build phenograms are substantially larger
     # than taxonomy metadata responses and need a separate socket timeout.
-    'PHENOGRAM_TIMEOUT': float(
-        os.environ.get('ARTDATABANKEN_PHENOGRAM_TIMEOUT', '60')
-    ),
+    "PHENOGRAM_TIMEOUT": float(os.environ.get("ARTDATABANKEN_PHENOGRAM_TIMEOUT", "60")),
     # Minimum quiet period after any Artdatabanken response before another
     # Dyntaxa, Artfakta or SOS request may start. Shared across local processes.
-    'COOLDOWN_SECONDS': float(
-        os.environ.get('ARTDATABANKEN_COOLDOWN_SECONDS', '1')
-    ),
-    'COOLDOWN_STATE_FILE': os.environ.get(
-        'ARTDATABANKEN_COOLDOWN_STATE_FILE'
-    ),
-    'USER_AGENT': os.environ.get(
-        'ARTDATABANKEN_USER_AGENT', 'Tempus (+tempus.services.artdatabanken)'
+    "COOLDOWN_SECONDS": float(os.environ.get("ARTDATABANKEN_COOLDOWN_SECONDS", "1")),
+    "COOLDOWN_STATE_FILE": os.environ.get("ARTDATABANKEN_COOLDOWN_STATE_FILE"),
+    "USER_AGENT": os.environ.get(
+        "ARTDATABANKEN_USER_AGENT", "Tempus (+tempus.services.artdatabanken)"
     ),
     # Artfakta SpeciesDataService dataset path segments. The biotoper segment is
     # unverified; override if biotopes come back empty (see BIOTOPES_DATASET in
     # tempus/services/artdatabanken.py).
-    'SPECIESDATA_LANDSCAPES_PATH': os.environ.get(
-        'ARTDATABANKEN_SPECIESDATA_LANDSCAPES_PATH', 'landscapetypes'
+    "SPECIESDATA_LANDSCAPES_PATH": os.environ.get(
+        "ARTDATABANKEN_SPECIESDATA_LANDSCAPES_PATH", "landscapetypes"
     ),
-    'SPECIESDATA_BIOTOPES_PATH': os.environ.get(
-        'ARTDATABANKEN_SPECIESDATA_BIOTOPES_PATH', 'biotopes'
+    "SPECIESDATA_BIOTOPES_PATH": os.environ.get(
+        "ARTDATABANKEN_SPECIESDATA_BIOTOPES_PATH", "biotopes"
     ),
 }
