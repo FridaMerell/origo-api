@@ -102,7 +102,10 @@ class SpeciesFilter(FilterSet):
     # mirrors SpeciesCategory.effective_species_ids so a category page's
     # species list matches its species_count.
     category = NumberFilter(method="filter_category")
-    categories__taxon_id = NumberFilter(field_name="categories__taxon_id")
+    # Keep the legacy query parameter used by the frontend, but give it the
+    # same subtree semantics as ``category``.  A parent category should expose
+    # species assigned directly to it as well as species assigned to any child.
+    categories__taxon_id = NumberFilter(method="filter_category")
     is_followed = BooleanFilter(field_name="is_followed")
 
     def filter_category(self, queryset, name, value):
