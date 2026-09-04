@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -44,6 +45,12 @@ class Species(models.Model):
 
     class Meta:
         ordering = ("scientific_name",)
+        indexes = [
+            GinIndex(
+                OpClass("swedish_name", name="gin_trgm_ops"),
+                name="tempus_species_swe_trgm_idx",
+            ),
+        ]
 
     def __str__(self):
         return self.swedish_name or self.scientific_name

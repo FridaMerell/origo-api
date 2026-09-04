@@ -110,6 +110,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "rest_framework.authtoken",
     "django_filters",
@@ -210,22 +211,22 @@ else:
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
-redis_url = os.environ.get('REDIS_URL')
+redis_url = os.environ.get("REDIS_URL")
 
 if redis_url:
     CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': redis_url,
-            'KEY_PREFIX': 'origo',
-            'TIMEOUT': 300,
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": redis_url,
+            "KEY_PREFIX": "origo",
+            "TIMEOUT": 300,
         }
     }
 else:
     CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'origo-local',
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "origo-local",
         }
     }
 # Password validation
