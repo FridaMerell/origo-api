@@ -187,7 +187,7 @@ class SpeciesViewSet(SharedDataViewSet):
     serializer_class = SpeciesSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = SpeciesFilter
-    search_fields = ["swedish_name", "scientific_name"]
+    search_fields = ["swedish_name"]
     lookup_field = "dyntaxa_taxon_id"
     pagination_class = StandardPagination
 
@@ -196,7 +196,14 @@ class SpeciesViewSet(SharedDataViewSet):
         followed = SpeciesFollow.objects.filter(
             species=OuterRef("pk"), user=user
         )
-        return super().get_queryset().annotate(is_followed=Exists(followed)).distinct()
+        # ``api_data`` is retained for refresh bookkeeping but is not part of
+        # the public response. Avoid loading it for every row in the catalogue.
+        # The EXISTS annotation cannot introduce duplicate Species rows, so a
+        # DISTINCT would only add unnecessary work to both the page and count
+        # queries.
+        return super().get_queryset().defer("api_data").annotate(
+            is_followed=Exists(followed)
+        )
 
     @action(
         detail=False,
