@@ -1,7 +1,7 @@
 import uuid
 
 from django.conf import settings
-from django.contrib.postgres.indexes import GinIndex, OpClass
+from django.contrib.postgres.indexes import GinIndex, OpClass, BTreeIndex
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -49,6 +49,9 @@ class Species(models.Model):
             GinIndex(
                 OpClass("swedish_name", name="gin_trgm_ops"),
                 name="tempus_species_swe_trgm_idx",
+            ),
+            BTreeIndex(
+                fields=["dyntaxa_taxon_id", 'parent_dyntaxa_taxon_id'],
             ),
         ]
 
