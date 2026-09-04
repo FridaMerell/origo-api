@@ -58,3 +58,18 @@ class BirdnetDeviceAdmin(admin.ModelAdmin):
     filter_horizontal = ("users",)
     readonly_fields = ("created_at", "updated_at")
 
+@admin.register(tempus.models.ChecklistItem, site=site)
+class ChecklistItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "checklist", "species", "sequence", "notes")
+    search_fields = ("checklist__name", "species__swedish_name", "species__scientific_name")
+    list_filter = ("checklist",)
+    autocomplete_fields = ("checklist", "species")
+    readonly_fields = ("id",)
+
+@admin.register(tempus.models.Observation, site=site)
+class ObservationAdmin(admin.ModelAdmin):
+    list_display = ("id", "checklist", "species", "observed_at", "notes")
+    search_fields = ("checklist__name", "species__swedish_name", "species__scientific_name")
+    list_filter = ("observed_at", "checklist")
+    autocomplete_fields = ("checklist", "species")
+    readonly_fields = ("id",)

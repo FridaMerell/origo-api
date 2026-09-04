@@ -13,6 +13,8 @@ This directory is the entry point for feature and integration documentation.
 - [Accounts](accounts/README.md)
   - [Inbjudningar (hus + projekt)](accounts/invitations.md)
 - [Flux](flux/README.md)
+- [Verso](verso/README.md)
+- [Apsis](apsis/README.md)
 
 ## Documentation rules
 
@@ -22,3 +24,5 @@ This directory is the entry point for feature and integration documentation.
 - Treat each external product's current OpenAPI document as authoritative.
 - Update these pages when endpoints, environment variables, tasks, retention,
   or external access change.
+- Router resources use trailing slashes. Exceptions are explicitly documented
+  on the relevant page.
