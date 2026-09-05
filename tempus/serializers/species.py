@@ -35,6 +35,7 @@ class SpeciesReferenceField(serializers.PrimaryKeyRelatedField):
 class SpeciesSerializer(serializers.ModelSerializer):
     # Annotated per-request by SpeciesViewSet.get_queryset; False on writes.
     is_followed = serializers.BooleanField(read_only=True, default=False)
+    checklists = serializers.SerializerMethodField()
 
     class Meta:
         model = Species
@@ -42,6 +43,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
             "id",
             "dyntaxa_taxon_id",
             "is_followed",
+            "checklists",
             "scientific_name",
             "swedish_name",
             "taxon_rank",
@@ -59,6 +61,17 @@ class SpeciesSerializer(serializers.ModelSerializer):
             "biotopes",
             "created_at",
             "updated_at",
+        ]
+
+    def get_checklists(self, obj):
+        """The caller's checklist and checklist-item IDs for this species."""
+        return [
+            {
+                "id": item.checklist_id,
+                "name": item.checklist.name,
+                "item_id": item.id,
+            }
+            for item in getattr(obj, "user_checklist_items", [])
         ]
 
 

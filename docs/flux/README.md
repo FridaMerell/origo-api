@@ -108,6 +108,25 @@ GET /api/flux/updates/?project=1
 GET /api/flux/updates/?task=3
 ```
 
+## Timeline
+
+`GET /api/flux/timeline/` returns all timeline data for every project the
+authenticated user can access:
+
+```json
+{
+  "projects": [],
+  "milestones": [],
+  "tasks": [],
+  "updates": [],
+  "documents": [],
+  "users": []
+}
+```
+
+The `users` collection includes project members, task assignees, and authors
+of updates and documents referenced by the returned data.
+
 ## Relationship notes
 
 - Projects are scoped to the authenticated user's memberships.

@@ -1,7 +1,17 @@
 """Species, phenogram, and follow views."""
 from datetime import date
 
-from django.db.models import Case, Exists, F, IntegerField, OuterRef, Q, Value, When
+from django.db.models import (
+    Case,
+    Exists,
+    F,
+    IntegerField,
+    OuterRef,
+    Prefetch,
+    Q,
+    Value,
+    When,
+)
 from django_filters.rest_framework import BooleanFilter, DjangoFilterBackend, FilterSet, NumberFilter
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -27,7 +37,13 @@ from tempus.serializers import (
     SpeciesSearchSerializer,
     SpeciesSerializer,
 )
-from tempus.models import Phenogram, Species, SpeciesCategory, SpeciesFollow
+from tempus.models import (
+    ChecklistItem,
+    Phenogram,
+    Species,
+    SpeciesCategory,
+    SpeciesFollow,
+)
 from tempus.services import artdatabanken, phenogram, season
 
 
@@ -107,8 +123,20 @@ class SpeciesViewSet(SharedDataViewSet):
         # The EXISTS annotation cannot introduce duplicate Species rows, so a
         # DISTINCT would only add unnecessary work to both the page and count
         # queries.
-        return super().get_queryset().defer("api_data").annotate(
-            is_followed=Exists(followed)
+        return (
+            super()
+            .get_queryset()
+            .defer("api_data")
+            .annotate(is_followed=Exists(followed))
+            .prefetch_related(
+                Prefetch(
+                    "checklist_items",
+                    queryset=ChecklistItem.objects.filter(
+                        checklist__user=user
+                    ).select_related("checklist"),
+                    to_attr="user_checklist_items",
+                )
+            )
         )
 
     @action(

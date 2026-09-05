@@ -114,7 +114,7 @@ def record_checklist_sighting(
     user: AbstractBaseUser,
     checklist_items: Iterable[ChecklistItem],
     observed_at: datetime,
-    location: dict[str, Any],
+    location: dict[str, Any] | None = None,
     count: int | None = None,
     notes: str = "",
 ) -> Observation:
@@ -136,7 +136,7 @@ def record_checklist_sighting(
         user=user,
         species=items[0].species,
         observed_at=observed_at,
-        location=location,
+        location=location or {},
         count=count,
         notes=notes,
     )

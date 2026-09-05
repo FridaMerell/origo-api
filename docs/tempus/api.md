@@ -33,6 +33,11 @@ Species actions:
 | `POST species/generate-phenograms/` | Staff bulk fan-out |
 | `GET species/seasonal-overview/` | Paginated seasonal cards; requires `geo_area`, with `min_records`, `status`, and `is_followed` optional |
 
+Regular `GET species/` and `GET species/{dyntaxa-id}/` responses include a
+`checklists` array scoped to the authenticated user. Every entry has the
+checklist `id`, its `name`, and `item_id`, which is the value to send in an
+observation's `checklist_items` array for explicit registration.
+
 ## Seasonal data
 
 ### Seasonal overview cards
@@ -82,7 +87,7 @@ start their season 7-14 days later.
 | `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled`. `DELETE species-follows/unfollow/?species=<dyntaxa-id>` removes the caller's follow addressed by Dyntaxa taxon id (`204`, or `404` if not followed) |
 | `routes/` | CRUD for current user; `planned_date` |
 | `route-stops/` | CRUD for current user's routes; `route` |
-| `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route` |
+| `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
 | `observations/` | CRUD for current user; `checklist_items`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id) |
 | `birdnet-devices/` | CRUD for devices shared with current user |
