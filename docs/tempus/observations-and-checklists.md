@@ -66,7 +66,7 @@ one species.
 
 The regular species list and detail responses include `checklists`, scoped to
 the authenticated user's checklists. Each entry contains the checklist `id`,
-display `name`, and the matching checklist item's `item_id`:
+ display `name`, `auto_add` setting, and the matching checklist item's `item_id`:
 
 ```json
 {
@@ -75,6 +75,7 @@ display `name`, and the matching checklist item's `item_id`:
     {
       "id": "<checklist-uuid>",
       "name": "Spring birds",
+      "auto_add": true,
       "item_id": "<checklist-item-uuid>"
     }
   ]
@@ -83,6 +84,32 @@ display `name`, and the matching checklist item's `item_id`:
 
 Use `item_id`, rather than the checklist ID, in an observation's
 `checklist_items` array for explicit registration.
+
+## Checklist register rows
+
+`GET /api/tempus/checklists/{checklistId}/register/` returns paginated
+checklist-item rows. Each row's `id` is the `ChecklistItem` UUID (not the
+checklist UUID). Use that value when deleting a species from a checklist:
+
+```http
+DELETE /api/tempus/checklist-items/{row.id}/
+```
+
+Example row:
+
+```json
+{
+  "id": "<checklist-item-uuid>",
+  "sequence": 1,
+  "notes": "",
+  "species_id": "<species-uuid>",
+  "swedish_name": "Koltrast",
+  "scientific_name": "Turdus merula",
+  "dyntaxa_taxon_id": 102822,
+  "is_observed": false,
+  "latest_observation_id": null
+}
+```
 
 ## API
 

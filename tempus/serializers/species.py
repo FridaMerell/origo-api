@@ -69,6 +69,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
             {
                 "id": item.checklist_id,
                 "name": item.checklist.name,
+                "auto_add": item.checklist.auto_add,
                 "item_id": item.id,
             }
             for item in getattr(obj, "user_checklist_items", [])

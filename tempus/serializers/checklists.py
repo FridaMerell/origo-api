@@ -195,6 +195,22 @@ class ChecklistItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("The checklist does not belong to you.")
         return checklist
 
+    def create(self, validated_data):
+        item = super().create(validated_data)
+        sync_observations_to_checklists(
+            user=item.checklist.user,
+            checklist=item.checklist,
+        )
+        return item
+
+    def update(self, instance, validated_data):
+        item = super().update(instance, validated_data)
+        sync_observations_to_checklists(
+            user=item.checklist.user,
+            checklist=item.checklist,
+        )
+        return item
+
     def get_is_completed(self, obj):
         return obj.observations.exists()
 

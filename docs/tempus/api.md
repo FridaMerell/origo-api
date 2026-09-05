@@ -35,8 +35,9 @@ Species actions:
 
 Regular `GET species/` and `GET species/{dyntaxa-id}/` responses include a
 `checklists` array scoped to the authenticated user. Every entry has the
-checklist `id`, its `name`, and `item_id`, which is the value to send in an
-observation's `checklist_items` array for explicit registration.
+ checklist `id`, its `name`, `auto_add` setting, and `item_id`, which is the
+ value to send in an observation's `checklist_items` array for explicit
+ registration.
 
 ## Seasonal data
 

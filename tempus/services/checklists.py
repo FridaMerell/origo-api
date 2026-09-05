@@ -7,6 +7,7 @@ from typing import Any
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Prefetch
 
 from tempus.models import Checklist, ChecklistItem, Observation
 from tempus.services.geo import point_in_multipolygon
@@ -77,24 +78,60 @@ def sync_observations_to_checklists(
     Returns ``(observations_linked, checklist_item_links_created)``. Existing
     links are retained and do not count towards either total.
     """
+    items = ChecklistItem.objects.filter(
+        checklist__user_id=user.pk,
+        checklist__auto_add=True,
+    ).select_related("checklist", "checklist__geo_area")
+    if checklist is not None:
+        items = items.filter(checklist=checklist)
+
+    items_by_species = {}
+    for item in items:
+        items_by_species.setdefault(item.species_id, []).append(item)
+    if not items_by_species:
+        return 0, 0
+
+    item_ids = [
+        item.pk for species_items in items_by_species.values() for item in species_items
+    ]
+    observations = (
+        Observation.objects.filter(user=user, species_id__in=items_by_species)
+        .prefetch_related(
+            Prefetch(
+                "checklist_items",
+                queryset=ChecklistItem.objects.filter(pk__in=item_ids),
+                to_attr="_candidate_checklist_items",
+            )
+        )
+        .iterator(chunk_size=500)
+    )
+
     observations_linked = 0
     checklist_item_links_created = 0
-    for observation in Observation.objects.filter(user=user).iterator():
-        matches = matching_checklist_items(
-            user=user,
-            species_id=observation.species_id,
-            observed_at=observation.observed_at,
-            location=observation.location,
-            checklist=checklist,
-        )
+    for observation in observations:
+        observed_date = observation.observed_at.date()
+        matches = []
+        for item in items_by_species[observation.species_id]:
+            candidate = item.checklist
+            if candidate.start_date and observed_date < candidate.start_date:
+                continue
+            if candidate.end_date and observed_date > candidate.end_date:
+                continue
+            if candidate.geo_area_id:
+                try:
+                    if not point_in_multipolygon(
+                        observation.location, candidate.geo_area.geometry
+                    ):
+                        continue
+                except (IndexError, KeyError, TypeError, ValueError):
+                    continue
+            matches.append(item)
         if not matches:
             continue
 
-        existing_item_ids = set(
-            observation.checklist_items.filter(
-                pk__in=[item.pk for item in matches]
-            ).values_list("pk", flat=True)
-        )
+        existing_item_ids = {
+            item.pk for item in observation._candidate_checklist_items
+        }
         missing_items = [
             item for item in matches if item.pk not in existing_item_ids
         ]
