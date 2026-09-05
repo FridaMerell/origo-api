@@ -28,7 +28,7 @@ class Task(models.Model):
         YEARLY = "yearly", "Yearly"
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tasks")
-    milestone = models.ForeignKey(Milestone, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks")
+    milestone = models.ForeignKey(Milestone, on_delete=models.CASCADE, null=True, blank=True, related_name="tasks")
     parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="subtasks")
     requirements = models.ManyToManyField("self", symmetrical=False, blank=True, related_name="required_by")
     assignees = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name="tasks")

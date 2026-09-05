@@ -11,11 +11,10 @@ class UpdateViewSet(viewsets.ModelViewSet):
     filterset_fields = ['id', 'project', 'milestone', 'task']
 
     def get_queryset(self):
-        return (
-            Update.objects.filter(project__members=self.request.user)
-            .distinct()
-            .select_related('project', 'milestone', 'task', 'author')
-        )
+        queryset = Update.objects.filter(project__members=self.request.user)
+        if self.action in ('update', 'partial_update'):
+            return queryset.select_related('project', 'milestone', 'task')
+        return queryset
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)

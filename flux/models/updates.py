@@ -9,8 +9,8 @@ from .tasks import Task
 
 class Update(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="updates")
-    milestone = models.ForeignKey(Milestone, on_delete=models.SET_NULL, null=True, blank=True, related_name="updates")
-    task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="updates")
+    milestone = models.ForeignKey(Milestone, on_delete=models.CASCADE, null=True, blank=True, related_name="updates")
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, null=True, blank=True, related_name="updates")
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="updates")
     content = models.TextField()
     files = models.JSONField(blank=True, default=list)

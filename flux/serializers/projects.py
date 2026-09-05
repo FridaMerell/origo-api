@@ -1,5 +1,6 @@
 """Project serialization."""
 
+from django.db.models import Q
 from rest_framework import serializers
 
 from flux.models import Project
@@ -16,7 +17,18 @@ class ProjectSerializer(serializers.ModelSerializer):
         if self.instance is None:
             disallowed = [tag for tag in tags if tag.created_by_id != request.user.pk]
         else:
-            disallowed = [tag for tag in tags if tag.created_by_id != request.user.pk and not self.instance.tags.filter(pk=tag.pk).exists() and not tag.milestones.filter(project=self.instance).exists()]
+            submitted_ids = {tag.pk for tag in tags}
+            allowed_ids = set(
+                self.instance.tags.model.objects.filter(pk__in=submitted_ids)
+                .filter(
+                    Q(created_by=request.user)
+                    | Q(projects=self.instance)
+                    | Q(milestones__project=self.instance)
+                )
+                .values_list('pk', flat=True)
+                .distinct()
+            )
+            disallowed = [tag for tag in tags if tag.pk not in allowed_ids]
         if disallowed:
             raise serializers.ValidationError("Tags must be created by you before they can be added to a project.")
         return tags

@@ -85,7 +85,7 @@ def _validate_parent_refs(parent_refs):
 
 def serialize_project(project):
     milestones = list(project.milestones.order_by('id'))
-    tasks = list(project.tasks.select_related('milestone', 'parent').order_by('id'))
+    tasks = list(project.tasks.order_by('id'))
     return {
         'id': project.id,
         'name': project.name,
@@ -121,7 +121,7 @@ def serialize_project(project):
                 'task_id': item.task_id,
                 'created_at': item.created_at.isoformat(),
             }
-            for item in project.updates.select_related('milestone', 'task').order_by('id')
+            for item in project.updates.order_by('id')
         ],
         'documents': [
             {
@@ -134,7 +134,7 @@ def serialize_project(project):
                 'created_at': item.created_at.isoformat(),
                 'updated_at': item.updated_at.isoformat(),
             }
-            for item in project.documents.select_related('milestone', 'task').order_by('id')
+            for item in project.documents.order_by('id')
         ],
     }
 
@@ -180,10 +180,13 @@ def _append_plan_to_project(project, user, plan):
         parent_refs[ref] = item.get('parent_ref')
 
     _validate_parent_refs(parent_refs)
+    tasks_with_parents = []
     for ref, parent_ref in parent_refs.items():
         if parent_ref is not None:
             tasks[ref].parent = tasks[parent_ref]
-            tasks[ref].save(update_fields=['parent'])
+            tasks_with_parents.append(tasks[ref])
+    if tasks_with_parents:
+        Task.objects.bulk_update(tasks_with_parents, ['parent'])
 
     for item in update_payloads:
         milestone_ref, task_ref = item.get('milestone_ref'), item.get('task_ref')

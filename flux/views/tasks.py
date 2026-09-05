@@ -1,4 +1,5 @@
 """Task views."""
+from django.db.models import Count, Prefetch
 from rest_framework import permissions, viewsets
 
 from flux.models import Task
@@ -20,15 +21,25 @@ class TaskViewSet(viewsets.ModelViewSet):
     ]
 
     def get_queryset(self):
-        return (
+        queryset = (
             Task.objects.filter(project__members=self.request.user)
-            .distinct()
-            .select_related('project', 'milestone', 'parent', 'recurrence_source')
-            .prefetch_related(
-                'subtasks',
-                'requirements',
-                'required_by',
-                'assignees',
-                'updates',
-            )
+            .annotate(update_count=Count('updates'))
         )
+        if self.action in ('list', 'retrieve'):
+            user_model = self.request.user.__class__
+            return queryset.prefetch_related(
+                Prefetch(
+                    'subtasks',
+                    queryset=Task.objects.only('id', 'parent_id'),
+                ),
+                Prefetch('requirements', queryset=Task.objects.only('id')),
+                Prefetch('required_by', queryset=Task.objects.only('id')),
+                Prefetch('assignees', queryset=user_model.objects.only('id')),
+            )
+        if self.action in ('update', 'partial_update'):
+            return queryset.select_related('project', 'milestone', 'parent')
+        return queryset
+
+    def perform_create(self, serializer):
+        task = serializer.save()
+        task.update_count = 0

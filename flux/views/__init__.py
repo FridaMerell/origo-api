@@ -11,6 +11,7 @@ from .milestones import MilestoneViewSet
 from .projects import ProjectViewSet
 from .tags import TagViewSet
 from .tasks import TaskViewSet
+from .timeline import TimelineView
 from .updates import UpdateViewSet
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "ProjectViewSet",
     "TagViewSet",
     "TaskViewSet",
+    "TimelineView",
     "UpdateViewSet",
 ]
