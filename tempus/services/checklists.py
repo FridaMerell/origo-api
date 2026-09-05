@@ -8,33 +8,51 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
-from tempus.models import ChecklistItem, Observation
+from tempus.models import Checklist, ChecklistItem, Observation
+from tempus.services.geo import point_in_multipolygon
 
 
 def matching_checklist_items(
-    *, user: AbstractBaseUser, species_id: Any, observed_at: datetime
+    *,
+    user: AbstractBaseUser,
+    species_id: Any,
+    observed_at: datetime,
+    location: dict[str, Any],
+    checklist: Checklist | None = None,
 ) -> list[ChecklistItem]:
     """Checklist items on this user's checklists that the observation satisfies.
 
-    Matches on species, and - when the checklist defines them - requires the
-    observation date to fall within the checklist's ``start_date``/``end_date``.
+    Only checklist items with automatic adding enabled are considered. Matches
+    require the same species, an observation date within the optional checklist
+    date range, and, when set, a location inside the checklist's geo area.
     """
     observed_date = observed_at.date()
     items = (
         ChecklistItem.objects.filter(
             checklist__user_id=user.pk,
             species_id=species_id,
+            checklist__auto_add=True,
         )
-        .select_related("checklist")
+        .select_related("checklist", "checklist__geo_area")
     )
+    if checklist is not None:
+        items = items.filter(checklist=checklist)
+
     matches = []
     for item in items:
-        start = item.checklist.start_date
-        end = item.checklist.end_date
+        candidate = item.checklist
+        start = candidate.start_date
+        end = candidate.end_date
         if start and observed_date < start:
             continue
         if end and observed_date > end:
             continue
+        if candidate.geo_area_id:
+            try:
+                if not point_in_multipolygon(location, candidate.geo_area.geometry):
+                    continue
+            except (IndexError, KeyError, TypeError, ValueError):
+                continue
         matches.append(item)
     return matches
 
@@ -45,12 +63,15 @@ def link_observation_to_checklists(observation: Observation) -> None:
         user=observation.user,
         species_id=observation.species_id,
         observed_at=observation.observed_at,
+        location=observation.location,
     )
     if items:
         observation.checklist_items.add(*items)
 
 
-def sync_observations_to_checklists(*, user: AbstractBaseUser) -> tuple[int, int]:
+def sync_observations_to_checklists(
+    *, user: AbstractBaseUser, checklist: Checklist | None = None
+) -> tuple[int, int]:
     """Link a user's existing observations to checklist items they satisfy.
 
     Returns ``(observations_linked, checklist_item_links_created)``. Existing
@@ -63,6 +84,8 @@ def sync_observations_to_checklists(*, user: AbstractBaseUser) -> tuple[int, int
             user=user,
             species_id=observation.species_id,
             observed_at=observation.observed_at,
+            location=observation.location,
+            checklist=checklist,
         )
         if not matches:
             continue

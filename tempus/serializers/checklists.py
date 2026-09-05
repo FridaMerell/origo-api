@@ -2,7 +2,11 @@
 from rest_framework import serializers
 
 from tempus.models import Checklist, ChecklistItem, Observation, Species, SpeciesCategory
-from tempus.services.checklists import link_observation_to_checklists, record_checklist_sighting
+from tempus.services.checklists import (
+    link_observation_to_checklists,
+    record_checklist_sighting,
+    sync_observations_to_checklists,
+)
 
 from .common import validate_geojson
 from .species import SpeciesReferenceField
@@ -37,6 +41,7 @@ class ChecklistSerializer(serializers.ModelSerializer):
             "species_count",
             "start_date",
             "end_date",
+            "auto_add",
             "geo_area",
             "route",
             "species",
@@ -58,13 +63,25 @@ class ChecklistSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"end_date": "The end date cannot be before the start date."}
             )
+        species_fields = (
+            "species",
+            "species_category_ids",
+            "species_category_taxon_ids",
+        )
+        has_species_input = any(field in attrs for field in species_fields)
         species_ids = set(attrs.get("species", []))
         category_ids = set(attrs.get("species_category_ids", []))
         category_taxon_ids = set(attrs.get("species_category_taxon_ids", []))
-        if not species_ids and not category_ids and not category_taxon_ids:
+        if self.instance is None and not (
+            species_ids or category_ids or category_taxon_ids
+        ):
             raise serializers.ValidationError(
                 {"species": "Provide at least one species or species category."}
             )
+
+        if self.instance is not None and not has_species_input:
+            attrs["_category_species_ids"] = set()
+            return attrs
 
         existing_species = set(
             Species.objects.filter(pk__in=species_ids).values_list("pk", flat=True)
@@ -151,15 +168,11 @@ class ChecklistSerializer(serializers.ModelSerializer):
         return route
 
     def backfill_observations(self, checklist):
-        """Link existing observations to the new checklist items."""
-        user = self.context["request"].user
-        observations_linked, checklist_item_links_created = link_observation_to_checklists(
-            user=user
+        """Link qualifying existing observations to this checklist's items."""
+        sync_observations_to_checklists(
+            user=checklist.user,
+            checklist=checklist,
         )
-        if observations_linked > 0:
-            print(
-                f"Linked {observations_linked} existing observations to {checklist_item_links_created} checklist items."
-            )
 
 
 class ChecklistItemSerializer(serializers.ModelSerializer):
