@@ -63,6 +63,26 @@ class RouteOwnershipTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['user'], self.stranger.pk)
 
+    def test_observation_response_includes_species_detail(self):
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+
+        response = client.get(f'/api/tempus/observations/{self.observation.pk}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['species_detail'],
+            {'dyntaxa_taxon_id': 1, 'swedish_name': 'Koltrast'},
+        )
+        self.assertEqual(
+            response.data['species_detail'],
+            {'dyntaxa_taxon_id': 1, 'swedish_name': 'Koltrast'},
+        )
+        self.assertEqual(
+            response.data['species_detail'],
+            {'dyntaxa_taxon_id': 1, 'swedish_name': 'Koltrast'},
+        )
+
     def test_cannot_add_a_stop_to_someone_elses_route(self):
         client = APIClient()
         client.force_authenticate(user=self.stranger)
@@ -165,3 +185,15 @@ class ObservationOwnershipTests(APITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['user'], self.stranger.pk)
+
+    def test_observation_response_includes_species_detail(self):
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+
+        response = client.get(f'/api/tempus/observations/{self.observation.pk}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['species_detail'],
+            {'dyntaxa_taxon_id': 1, 'swedish_name': 'Koltrast'},
+        )

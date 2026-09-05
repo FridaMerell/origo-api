@@ -120,6 +120,7 @@ class ObservationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return (
             Observation.objects.filter(user=self.request.user)
+            .select_related("species")
             .prefetch_related("checklist_items")
             .distinct()
         )

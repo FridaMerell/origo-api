@@ -226,12 +226,19 @@ class ChecklistRegisterItemSerializer(serializers.ModelSerializer):
         ]
 
 
+class ObservationSpeciesDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Species
+        fields = ["dyntaxa_taxon_id", "swedish_name"]
+
+
 class ObservationSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
     species = SpeciesReferenceField(
         queryset=Species.objects.all(),
         style={"base_template": "input.html"},
     )
+    species_detail = ObservationSpeciesDetailSerializer(source="species", read_only=True)
     checklist_names = serializers.SerializerMethodField()
     checklist_items = serializers.PrimaryKeyRelatedField(
         many=True,
@@ -245,6 +252,7 @@ class ObservationSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "species",
+            "species_detail",
             "checklist_items",
             "observed_at",
             "location",

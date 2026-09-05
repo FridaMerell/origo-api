@@ -89,7 +89,7 @@ start their season 7-14 days later.
 | `route-stops/` | CRUD for current user's routes; `route` |
 | `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
-| `observations/` | CRUD for current user; `checklist_items`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id) |
+| `observations/` | CRUD for current user; `checklist_items`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name` |
 | `birdnet-devices/` | CRUD for devices shared with current user |
 
 Route calculation:

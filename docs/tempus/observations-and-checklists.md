@@ -92,7 +92,9 @@ Use `item_id`, rather than the checklist ID, in an observation's
   `species`.
 - `/api/tempus/observations/`: user-scoped CRUD; filters `checklist_items` and
   `species`. The `species` filter accepts either a Species UUID or a Dyntaxa
-  taxon id; `species` in the request body accepts the same two forms.
+  taxon id; `species` in the request body accepts the same two forms. `GET`
+  list and detail responses include the read-only `species_detail` object with
+  the species' `dyntaxa_taxon_id` and `swedish_name`.
 
 Example observation:
 
@@ -104,6 +106,19 @@ Example observation:
   "location": {"type": "Point", "coordinates": [14.1567, 56.0294]},
   "count": 2,
   "notes": "Two individuals calling"
+}
+```
+
+Example response:
+
+```json
+{
+  "id": "<observation-uuid>",
+  "species": "<species-uuid>",
+  "species_detail": {
+    "dyntaxa_taxon_id": 102822,
+    "swedish_name": "Koltrast"
+  }
 }
 ```
 

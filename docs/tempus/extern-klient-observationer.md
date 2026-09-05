@@ -20,7 +20,18 @@ Content-Type: application/json
 `species` och `observed_at` krävs. `species` kan vara antingen Tempus art-UUID
 eller Dyntaxa taxon-id. `location` är valfri; om den skickas ska den vara en
 GeoJSON Point med koordinater i ordningen longitud, latitud. Vid lyckat anrop
-returneras `201 Created`.
+returneras `201 Created`. Svaret, liksom `GET /api/tempus/observations/` och
+`GET /api/tempus/observations/{id}/`, innehåller även det skrivskyddade fältet
+`species_detail`:
+
+```json
+{
+  "species_detail": {
+    "dyntaxa_taxon_id": 102822,
+    "swedish_name": "Koltrast"
+  }
+}
+```
 
 ## C#-exempel
 
