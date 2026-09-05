@@ -6,7 +6,6 @@ from origo.admin import site
 class VersoUpdateAdmin(admin.ModelAdmin):
     list_display = ('venture', 'task', 'author', 'title', 'created_at', 'updated_at')
 
-# Register your models here.
 @admin.register(House, site=site)
 class HouseAdmin(admin.ModelAdmin):
     list_display = ('name', 'address', 'created_at', 'updated_at')

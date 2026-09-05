@@ -1,17 +1,17 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from tempus.api.category_views import SpeciesCategoryViewSet
-from tempus.api.reference_views import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet
-from tempus.api.views.birdnet import BirdnetDeviceViewSet
-from tempus.api.views.checklists import (
+from tempus.views.birdnet import BirdnetDeviceViewSet
+from tempus.views.checklists import (
     ChecklistItemViewSet,
     ChecklistViewSet,
     ObservationViewSet,
 )
-from tempus.api.views.routes import RouteStopViewSet, RouteViewSet
-from tempus.api.views.species import (
+from tempus.views.reference import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet
+from tempus.views.routes import RouteStopViewSet, RouteViewSet
+from tempus.views.species import (
     PhenogramViewSet,
+    SpeciesCategoryViewSet,
     SpeciesFollowViewSet,
     SpeciesViewSet,
 )

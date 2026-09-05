@@ -12,4 +12,4 @@ class Post(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return ", ".join(file['name'] for file in self.files) if self.files else "No files"
+        return ", ".join(file.get('name', '?') for file in self.files) if self.files else "No files"

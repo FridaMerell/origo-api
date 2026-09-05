@@ -34,7 +34,7 @@ def read_sse_events(response, count):
 
     frames = []
     try:
-        with mock.patch("tempus.views.time.sleep", _no_poll):
+        with mock.patch("tempus.views.birdnet.time.sleep", _no_poll):
             for _ in range(count):
                 frames.append(next(iterator).decode())
     finally:
