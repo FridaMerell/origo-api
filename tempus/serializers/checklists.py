@@ -112,12 +112,54 @@ class ChecklistSerializer(serializers.ModelSerializer):
                 for sequence, species_id in enumerate(sorted(all_species_ids), start=1)
             ]
         )
+
+        self.backfill_observations(checklist)
         return checklist
+
+    def update(self, instance, validated_data):
+        species_ids = set(validated_data.pop("species", []))
+        category_species_ids = validated_data.pop("_category_species_ids", set())
+        validated_data.pop("species_category_ids", None)
+        validated_data.pop("species_category_taxon_ids", None)
+        instance = super().update(instance, validated_data)
+        all_species_ids = species_ids | category_species_ids
+        existing_items = {item.species_id: item for item in instance.items.all()}
+        new_items = []
+        for sequence, species_id in enumerate(sorted(all_species_ids), start=1):
+            if species_id in existing_items:
+                item = existing_items[species_id]
+                item.sequence = sequence
+                item.save(update_fields=["sequence"])
+            else:
+                new_items.append(
+                    ChecklistItem(
+                        checklist=instance,
+                        species_id=species_id,
+                        sequence=sequence,
+                        notes="",
+                    )
+                )
+        if new_items:
+            ChecklistItem.objects.bulk_create(new_items)
+
+        self.backfill_observations(instance)
+        return instance
 
     def validate_route(self, route):
         if route is not None and route.user_id != self.context["request"].user.pk:
             raise serializers.ValidationError("The route does not belong to you.")
         return route
+
+    def backfill_observations(self, checklist):
+        """Link existing observations to the new checklist items."""
+        user = self.context["request"].user
+        observations_linked, checklist_item_links_created = link_observation_to_checklists(
+            user=user
+        )
+        if observations_linked > 0:
+            print(
+                f"Linked {observations_linked} existing observations to {checklist_item_links_created} checklist items."
+            )
 
 
 class ChecklistItemSerializer(serializers.ModelSerializer):
