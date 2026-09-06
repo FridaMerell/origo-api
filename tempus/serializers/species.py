@@ -38,6 +38,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
     is_followed = serializers.BooleanField(read_only=True, default=False)
     is_notify = serializers.BooleanField(read_only=True, default=False)
     checklists = serializers.SerializerMethodField()
+    stages = serializers.SerializerMethodField()
 
     class Meta:
         model = Species
@@ -47,6 +48,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
             "is_followed",
             "is_notify",
             "checklists",
+            "stages",
             "scientific_name",
             "swedish_name",
             "taxon_rank",
@@ -77,6 +79,20 @@ class SpeciesSerializer(serializers.ModelSerializer):
             }
             for item in getattr(obj, "user_checklist_items", [])
         ]
+
+    def get_stages(self, obj):
+        """Return each applicable category life stage once, in category order."""
+        categories = getattr(obj, "life_stage_categories", None)
+        if categories is None:
+            categories = obj.categories.order_by("label")
+
+        return list(
+            dict.fromkeys(
+                stage
+                for category in categories
+                for stage in category.stages
+            )
+        )
 
 
 
