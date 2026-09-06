@@ -307,6 +307,7 @@ def _next_season_start_date(day_of_year, today):
 @task()
 def notify_followed_species_season_start():
     """Notify followers on Sunday about species entering season in 7-14 days."""
+    from accounts.tasks import send_notification_email
     from tempus.models import Phenogram, SpeciesFollow
 
     today = timezone.localdate()
@@ -375,11 +376,12 @@ def notify_followed_species_season_start():
             created_at__date=today,
         ).exists()
         if not already_sent:
-            Notification.objects.create(
+            notification = Notification.objects.create(
                 user=user,
                 domain="tempus",
                 message=message,
             )
+            send_notification_email.enqueue(notification.pk)
             created += 1
 
     logger.info(
