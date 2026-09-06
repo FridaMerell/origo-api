@@ -58,6 +58,7 @@ class Observation(models.Model):
     count = models.PositiveIntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    life_stage = models.TextField(null=True)
 
     class Meta:
         ordering = ("-observed_at",)
