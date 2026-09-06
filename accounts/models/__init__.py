@@ -4,5 +4,6 @@ from .credentials import CodexToken
 from .identity import User
 from .invitations import Invitation
 from .notifications import Notification
+from .push import WebPushSubscription
 
-__all__ = ["CodexToken", "Invitation", "Notification", "User"]
+__all__ = ["CodexToken", "Invitation", "Notification", "User", "WebPushSubscription"]

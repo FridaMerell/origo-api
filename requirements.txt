@@ -12,3 +12,4 @@ gunicorn==26.2.0
 gevent==26.8.0
 packaging==26.3
 redis==7.1.0
+pywebpush==2.5.0

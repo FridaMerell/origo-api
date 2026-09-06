@@ -278,6 +278,16 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "")
 
 
+# Web Push (VAPID)
+# One key pair, generated once (`vapid --gen` / `npx web-push generate-vapid-keys`).
+# The public key must also be handed to the frontend as NEXT_PUBLIC_VAPID_PUBLIC_KEY.
+WEBPUSH_VAPID_PUBLIC_KEY = os.environ.get("WEBPUSH_VAPID_PUBLIC_KEY", "")
+WEBPUSH_VAPID_PRIVATE_KEY = os.environ.get("WEBPUSH_VAPID_PRIVATE_KEY", "")
+WEBPUSH_VAPID_SUBJECT = os.environ.get(
+    "WEBPUSH_VAPID_SUBJECT", "mailto:frida.merell@gmail.com"
+)
+
+
 # Django REST Framework
 # https://www.django-rest-framework.org/api-guide/settings/
 
@@ -292,6 +302,10 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
+    "DEFAULT_THROTTLE_RATES": {
+        "push-subscriptions": "30/min",
+        "push-test": "6/min",
+    },
 }
 
 

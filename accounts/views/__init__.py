@@ -3,6 +3,7 @@
 from .authentication import CSRFTokenView, LoginView, LogoutView, MeView
 from .invitations import InvitationViewSet
 from .notifications import NotificationViewSet
+from .push import WebPushSubscriptionTestView, WebPushSubscriptionView
 from .users import SelfViewSet, UserViewSet
 
 __all__ = [
@@ -14,4 +15,6 @@ __all__ = [
     "NotificationViewSet",
     "SelfViewSet",
     "UserViewSet",
+    "WebPushSubscriptionTestView",
+    "WebPushSubscriptionView",
 ]

@@ -11,6 +11,8 @@ from accounts.views import (
     NotificationViewSet,
     SelfViewSet,
     UserViewSet,
+    WebPushSubscriptionTestView,
+    WebPushSubscriptionView,
 )
 
 app_name = 'accounts'
@@ -27,5 +29,15 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path('token/', obtain_auth_token, name='token'),
     path('me/', MeView.as_view(), name='me'),
+    path(
+        'push-subscriptions/',
+        WebPushSubscriptionView.as_view(),
+        name='push-subscriptions',
+    ),
+    path(
+        'push-subscriptions/test/',
+        WebPushSubscriptionTestView.as_view(),
+        name='push-subscriptions-test',
+    ),
     path('', include(router.urls)),
 ]

@@ -8,6 +8,7 @@ from django.template.loader import render_to_string
 from django_tasks import task
 
 from accounts.models import Notification
+from accounts.push import build_notification_payload, send_payload_to_user
 
 
 logger = logging.getLogger(__name__)
@@ -105,3 +106,16 @@ def send_notification_email_now(notification_pk, template_key="generic", context
 def send_notification_email(notification_pk, template_key="generic", context=None):
     """Queueable wrapper for delivery of one existing notification."""
     return send_notification_email_now(notification_pk, template_key, context)
+
+
+@task()
+def send_web_push_for_notification(notification_pk):
+    """Push one existing in-app notification to the recipient's browsers."""
+    notification = (
+        Notification.objects.select_related("user").filter(pk=notification_pk).first()
+    )
+    if notification is None:
+        return {"sent": 0, "reason": "notification_not_found"}
+    payload = build_notification_payload(notification)
+    sent, dead = send_payload_to_user(notification.user, payload)
+    return {"sent": sent, "dead": dead}

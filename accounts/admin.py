@@ -5,7 +5,7 @@ from django.core.exceptions import PermissionDenied
 from django.template.response import TemplateResponse
 from django.utils import timezone
 
-from accounts.models import CodexToken, Notification, User
+from accounts.models import CodexToken, Notification, User, WebPushSubscription
 from origo.admin import site
 
 site.register(User, UserAdmin)
@@ -16,6 +16,14 @@ class NotificationAdmin(admin.ModelAdmin):
     list_display = ['user', 'domain', 'message', 'is_read', 'created_at', 'sent_by']
     list_filter = ['domain', 'is_read']
     search_fields = ['message', 'user__username', 'user__email']
+
+
+@admin.register(WebPushSubscription, site=site)
+class WebPushSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ('user', 'tenant', 'is_active', 'created_at')
+    list_filter = ('is_active', 'tenant')
+    search_fields = ('user__username', 'user__email', 'endpoint')
+    readonly_fields = ('created_at', 'last_success_at')
 
 
 class CodexTokenIssueForm(forms.Form):
