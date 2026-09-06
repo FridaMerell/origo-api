@@ -15,6 +15,7 @@ from .species import SpeciesReferenceField
 class ChecklistSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
     species_count = serializers.SerializerMethodField()
+    completed_species_count = serializers.SerializerMethodField()
     species = serializers.ListField(
         child=serializers.UUIDField(), write_only=True, required=False, default=list
     )
@@ -39,6 +40,7 @@ class ChecklistSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "species_count",
+            "completed_species_count",
             "start_date",
             "end_date",
             "auto_add",
@@ -54,6 +56,9 @@ class ChecklistSerializer(serializers.ModelSerializer):
 
     def get_species_count(self, obj):
         return obj.items.values("species").distinct().count()
+
+    def get_completed_species_count(self, obj):
+        return obj.items.filter(observations__isnull=False).distinct().count()
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
