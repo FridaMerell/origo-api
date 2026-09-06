@@ -20,16 +20,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         """Users who share a Flux project or Verso house with the requester."""
-        return User.objects.filter(
-            Q(projects__members=self.request.user)
-            | Q(houses__members=self.request.user)
-        ).exclude(pk=self.request.user.pk).annotate(
-            open_notifications=Count(
-                "notifications",
-                filter=Q(notifications__is_read=False),
-                distinct=True,
-            )
-        ).distinct()
+        return User.objects.distinct()
 
 class SelfViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
