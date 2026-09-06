@@ -1,0 +1,9 @@
+Säsongsstart om 7–14 dagar
+
+Hej {{ recipient_name }},
+
+Följande arter som du följer väntas gå in i säsong:
+
+{% for species_name in species_names %}- {{ species_name }}
+{% endfor %}
+Du kan se mer information i Tempus.

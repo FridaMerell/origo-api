@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ email_title }}</title>
+</head>
+<body style="margin:0;background:#ffffff;color:#202124;font-family:Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{ preheader }}</div>
+  <div style="max-width:600px;padding:28px 20px;">
+    <p style="margin:0 0 24px;color:#5f6368;font-size:13px;">Tempus</p>
+    <h1 style="margin:0 0 20px;font-size:20px;line-height:1.4;">Säsongsstart om 7–14 dagar</h1>
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">Hej {{ recipient_name }},</p>
+    <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">Följande arter som du följer väntas gå in i säsong:</p>
+    <ul style="margin:0 0 20px;padding-left:22px;font-size:15px;line-height:1.7;">
+      {% for species_name in species_names %}<li>{{ species_name }}</li>{% endfor %}
+    </ul>
+    <p style="margin:0 0 32px;font-size:15px;line-height:1.6;">Du kan se mer information i Tempus.</p>
+    <p style="margin:0;color:#5f6368;font-size:12px;line-height:1.5;">Automatisk notifikation från Tempus.</p>
+  </div>
+</body>
+</html>

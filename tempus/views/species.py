@@ -43,6 +43,7 @@ from tempus.models import (
     Species,
     SpeciesCategory,
     SpeciesFollow,
+    species,
 )
 from tempus.services import artdatabanken, phenogram, season
 
@@ -118,6 +119,11 @@ class SpeciesViewSet(SharedDataViewSet):
         followed = SpeciesFollow.objects.filter(
             species=OuterRef("pk"), user=user
         )
+        is_notify = SpeciesFollow.objects.filter(
+            species=OuterRef("pk"), user=user
+        ).filter(
+            notifications_enabled=True
+        )
         # ``api_data`` is retained for refresh bookkeeping but is not part of
         # the public response. Avoid loading it for every row in the catalogue.
         # The EXISTS annotation cannot introduce duplicate Species rows, so a
@@ -127,7 +133,7 @@ class SpeciesViewSet(SharedDataViewSet):
             super()
             .get_queryset()
             .defer("api_data")
-            .annotate(is_followed=Exists(followed))
+            .annotate(is_followed=Exists(followed), is_notify=(Exists(is_notify)))
             .prefetch_related(
                 Prefetch(
                     "categories",

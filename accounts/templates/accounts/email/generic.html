@@ -1,0 +1,7 @@
+{% extends "accounts/email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 8px;color:#53606b;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">{{ app_name }}</p>
+  <h1 style="margin:0 0 20px;font-size:28px;line-height:1.2;">Ny notifikation</h1>
+  <p style="margin:0 0 18px;font-size:16px;line-height:1.6;">Hej {{ recipient_name }},</p>
+  <p style="margin:0;font-size:16px;line-height:1.6;white-space:pre-line;">{{ notification_message }}</p>
+{% endblock %}

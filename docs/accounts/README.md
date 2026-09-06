@@ -63,6 +63,28 @@ first. Read-only rows; only the read-state actions below mutate them.
 The Tempus season digest is delivered here — see
 [Tempus phenograms](../tempus/phenograms.md).
 
+### Email delivery
+
+Email delivery uses Resend while `Notification` remains the canonical in-app
+record. Configure these deployment-only variables; never commit their values:
+
+| Variable | Purpose |
+|---|---|
+| `RESEND_API_KEY` | Resend API key with sending permission. |
+| `RESEND_FROM_EMAIL` | Verified Resend sender, for example `Origo <notifications@example.com>`. |
+
+`accounts.tasks.send_notification_email` sends one existing notification by
+email. Flux deadline and Tempus season notifications queue this task after
+they create their in-app notification. If Resend is not configured, the task
+returns without sending and the in-app notification remains available.
+
+To create clearly marked Flux and Tempus test notifications, then queue their
+email delivery through the normal task worker, run:
+
+```text
+python manage.py test_notification_emails --to recipient@example.com
+```
+
 ## Invitations
 
 Shareable multi-use invite links for Verso houses and Flux projects. See

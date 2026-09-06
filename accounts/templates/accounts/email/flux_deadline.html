@@ -1,0 +1,11 @@
+{% extends "accounts/email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 8px;color:#a04b12;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">Deadline idag</p>
+  <h1 style="margin:0 0 20px;font-size:28px;line-height:1.2;">{{ task_title }}</h1>
+  <p style="margin:0 0 18px;font-size:16px;line-height:1.6;">Hej {{ recipient_name }},</p>
+  <p style="margin:0 0 18px;font-size:16px;line-height:1.6;">
+    Uppgiften <strong>{{ task_title }}</strong> i projektet <strong>{{ project_name }}</strong> har deadline idag.
+  </p>
+  <p style="margin:0 0 22px;font-size:16px;line-height:1.6;">Öppna Flux för att se detaljerna och uppdatera statusen.</p>
+  <p style="margin:0;color:#68737d;font-size:12px;">Uppgifts-id: {{ task_id }}</p>
+{% endblock %}

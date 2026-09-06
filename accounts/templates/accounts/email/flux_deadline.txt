@@ -1,0 +1,9 @@
+Deadline idag
+
+Hej {{ recipient_name }},
+
+Uppgiften "{{ task_title }}" i projektet "{{ project_name }}" har deadline idag.
+
+Öppna Flux för att se detaljerna och uppdatera statusen.
+
+Uppgifts-id: {{ task_id }}

@@ -346,7 +346,7 @@ def notify_followed_species_season_start():
         candidates_by_user.setdefault(follow.user, []).append(str(follow.species))
 
     created = 0
-    prefix = "Fåglar som börjar komma i säsong inom 7-14 dagar enligt phenogrammet:"
+    prefix = "Snart i säsong – följda arter vars phenogram börjar inom 7–14 dagar:"
     for user, species_names in candidates_by_user.items():
         recent_messages = Notification.objects.filter(
             user=user,
@@ -381,7 +381,11 @@ def notify_followed_species_season_start():
                 domain="tempus",
                 message=message,
             )
-            send_notification_email.enqueue(notification.pk)
+            send_notification_email.enqueue(
+                notification.pk,
+                "tempus_season",
+                {"species_names": species_names},
+            )
             created += 1
 
     logger.info(

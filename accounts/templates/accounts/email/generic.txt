@@ -1,0 +1,5 @@
+Ny notifikation från {{ app_name }}
+
+Hej {{ recipient_name }},
+
+{{ notification_message }}

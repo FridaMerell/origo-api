@@ -1,4 +1,5 @@
 """Taxonomy, seasonal-curve, and follow serializers."""
+
 import csv
 import io
 
@@ -35,8 +36,8 @@ class SpeciesReferenceField(serializers.PrimaryKeyRelatedField):
 class SpeciesSerializer(serializers.ModelSerializer):
     # Annotated per-request by SpeciesViewSet.get_queryset; False on writes.
     is_followed = serializers.BooleanField(read_only=True, default=False)
+    is_notify = serializers.BooleanField(read_only=True, default=False)
     checklists = serializers.SerializerMethodField()
-    stages = serializers.SerializerMethodField()
 
     class Meta:
         model = Species
@@ -44,8 +45,8 @@ class SpeciesSerializer(serializers.ModelSerializer):
             "id",
             "dyntaxa_taxon_id",
             "is_followed",
+            "is_notify",
             "checklists",
-            "stages",
             "scientific_name",
             "swedish_name",
             "taxon_rank",
@@ -77,14 +78,6 @@ class SpeciesSerializer(serializers.ModelSerializer):
             for item in getattr(obj, "user_checklist_items", [])
         ]
 
-    def get_stages(self, obj):
-        """Return the unique life stages available through this species' categories."""
-        stages = []
-        for category in getattr(obj, "life_stage_categories", obj.categories.all()):
-            for stage in category.stages:
-                if stage not in stages:
-                    stages.append(stage)
-        return stages
 
 
 class SpeciesResolveRequestSerializer(serializers.Serializer):
@@ -496,7 +489,7 @@ class SpeciesCategorySerializer(serializers.ModelSerializer):
             "species_memberships",
             "species_count",
             "taxon_id",
-            'stages'
+            "stages",
         ]
         read_only_fields = ["id", "species", "species_memberships", "species_count"]
 
@@ -597,6 +590,5 @@ class SpeciesCategoryListSerializer(serializers.ModelSerializer):
             "species",
             "species_count",
             "taxon_id",
-            "stages",
         ]
         read_only_fields = ["id", "species", "species_count"]

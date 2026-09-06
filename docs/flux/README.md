@@ -94,6 +94,12 @@ Recurring tasks require a due date. Valid recurrence values are `none`,
 one, and `recurrence_end_date` cannot be before the due date. Completing a
 recurring task creates its next occurrence when one is due.
 
+Open tasks whose `due_date` is today are processed by the daily
+`notify_flux_task_deadlines` background task. Each assignee receives an in-app
+`accounts.Notification` in the `flux` domain. When Resend is configured, the
+same notification is queued for email delivery. A task is notified at most
+once per assignee and day.
+
 ### Updates
 
 - `id`

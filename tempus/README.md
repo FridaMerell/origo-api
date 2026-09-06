@@ -180,6 +180,7 @@ It is exposed two ways:
   every Sunday for followed species whose phenogram season starts 7-14 days
   later. All matching species for one user are grouped into one digest, and a
   species is not repeated in another digest within the following 14 days.
+  When Resend is configured, the same digest is also queued for email delivery.
   Enqueue it once from the Django task/operations setup; it schedules its next
   weekly run itself. Notifications are read through
   `/api/accounts/notifications/`.

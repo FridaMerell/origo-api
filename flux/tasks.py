@@ -50,8 +50,10 @@ def notify_flux_task_deadlines():
     created = 0
     for flux_task in due_tasks:
         message = (
-            f"Deadline idag: {flux_task.title}\n"
+            f"Deadline idag\n\n"
+            f"{flux_task.title}\n"
             f"Projekt: {flux_task.project.name}\n"
+            "Öppna Flux för att se detaljerna och uppdatera statusen.\n"
             f"Uppgifts-id: {flux_task.pk}"
         )
         for user in flux_task.assignees.all():
@@ -69,7 +71,15 @@ def notify_flux_task_deadlines():
                 domain="flux",
                 message=message,
             )
-            send_notification_email.enqueue(notification.pk)
+            send_notification_email.enqueue(
+                notification.pk,
+                "flux_deadline",
+                {
+                    "task_title": flux_task.title,
+                    "project_name": flux_task.project.name,
+                    "task_id": flux_task.pk,
+                },
+            )
             created += 1
 
     logger.info("notify_flux_task_deadlines: created %d notification(s)", created)
