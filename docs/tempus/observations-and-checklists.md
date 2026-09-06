@@ -111,10 +111,50 @@ Example row:
 }
 ```
 
+## Update a checklist from a species category
+
+When a category has gained new species, synchronize the checklist with:
+
+```http
+POST /api/tempus/checklists/{checklistId}/sync-category/
+Content-Type: application/json
+
+{
+  "species_category_id": "<category-uuid>"
+}
+```
+
+The category UUID is the `id` returned by the species-category API. Species
+assigned to the selected category or any of its subcategories are considered.
+Only missing species are added: existing checklist items, their notes, and
+their ordering are left unchanged. Newly added items are appended in
+scientific-name order.
+
+The endpoint also backfills qualifying observations for the new items when the
+checklist's `auto_add` setting is enabled. It returns `200 OK`, including the
+number of added species and the checklist's resulting species count:
+
+```json
+{
+  "species_category_id": "<category-uuid>",
+  "species_added": 12,
+  "species_count": 58
+}
+```
+
+Calling the endpoint again with the same category is safe; it returns
+`"species_added": 0` until the category receives more species. It does not
+remove species from the checklist, including species that no longer belong to
+the category.
+
 ## API
 
 - `/api/tempus/checklists/`: user-scoped CRUD; filters `start_date`, `geo_area`,
   and `route`. Responses include `auto_add` and derived `species_count`.
+- `POST /api/tempus/checklists/{checklistId}/sync-category/`: adds every missing
+  species in a category and its subcategories. Send
+  `{"species_category_id": "<category-uuid>"}`. Existing checklist items are
+  retained; the response includes `species_added` and the new `species_count`.
 - `/api/tempus/checklist-items/`: user-scoped CRUD; filters `checklist` and
   `species`.
 - `/api/tempus/observations/`: user-scoped CRUD; filters `checklist_items` and

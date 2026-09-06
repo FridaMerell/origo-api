@@ -88,10 +88,21 @@ start their season 7-14 days later.
 | `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled`. `DELETE species-follows/unfollow/?species=<dyntaxa-id>` removes the caller's follow addressed by Dyntaxa taxon id (`204`, or `404` if not followed) |
 | `routes/` | CRUD for current user; `planned_date` |
 | `route-stops/` | CRUD for current user's routes; `route` |
-| `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking |
+| `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking. `POST {id}/sync-category/` adds all missing species from a category subtree. |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
 | `observations/` | CRUD for current user; `checklist_items`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name` |
 | `birdnet-devices/` | CRUD for devices shared with current user |
+
+### Synchronize a checklist category
+
+`POST checklists/{id}/sync-category/` accepts
+`{ "species_category_id": "<category-uuid>" }`. It adds every missing species
+from that category and all of its descendants to the current user's checklist.
+Existing items are retained, and the response is
+`{ "species_category_id", "species_added", "species_count" }`. The action is
+idempotent for an unchanged category and never removes existing checklist
+species. See [Observations and checklists](observations-and-checklists.md#update-a-checklist-from-a-species-category)
+for the full request and response examples.
 
 Route calculation:
 

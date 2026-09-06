@@ -7,9 +7,9 @@ from typing import Any
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Max, Prefetch
 
-from tempus.models import Checklist, ChecklistItem, Observation
+from tempus.models import Checklist, ChecklistItem, Observation, SpeciesCategory
 from tempus.services.geo import point_in_multipolygon
 
 
@@ -143,6 +143,42 @@ def sync_observations_to_checklists(
         checklist_item_links_created += len(missing_items)
 
     return observations_linked, checklist_item_links_created
+
+
+@transaction.atomic
+def add_category_species_to_checklist(
+    *, checklist: Checklist, category: SpeciesCategory
+) -> int:
+    """Add any species in ``category``'s subtree that are missing from a checklist.
+
+    Existing checklist items, including their notes and order, are retained.
+    The category's direct and descendant species are appended in scientific-name
+    order. Returns the number of new items.
+    """
+    existing_species_ids = set(
+        checklist.items.values_list("species_id", flat=True)
+    )
+    category_species = category.effective_species_queryset().exclude(
+        pk__in=existing_species_ids
+    )
+    next_sequence = (
+        checklist.items.aggregate(max_sequence=Max("sequence"))["max_sequence"] or 0
+    )
+    new_items = [
+        ChecklistItem(
+            checklist=checklist,
+            species=species,
+            sequence=next_sequence + position,
+            notes="",
+        )
+        for position, species in enumerate(category_species, start=1)
+    ]
+    if not new_items:
+        return 0
+
+    ChecklistItem.objects.bulk_create(new_items)
+    sync_observations_to_checklists(user=checklist.user, checklist=checklist)
+    return len(new_items)
 
 
 @transaction.atomic

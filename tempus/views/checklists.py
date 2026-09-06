@@ -17,7 +17,7 @@ from tempus.serializers import (
     ChecklistSerializer,
     ObservationSerializer,
 )
-from tempus.models import Checklist, ChecklistItem, Observation
+from tempus.models import Checklist, ChecklistItem, Observation, SpeciesCategory
 from tempus.services import checklists
 
 
@@ -76,6 +76,35 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="sync-category")
+    def sync_category(self, request, pk=None):
+        """Add all missing species from a category and its subcategories."""
+        try:
+            category_id = uuid.UUID(str(request.data.get("species_category_id")))
+        except (ValueError, TypeError, AttributeError):
+            raise ValidationError(
+                {"species_category_id": "Ange ett giltigt kategori-UUID."}
+            )
+        try:
+            category = SpeciesCategory.objects.get(pk=category_id)
+        except SpeciesCategory.DoesNotExist:
+            raise ValidationError(
+                {"species_category_id": "Ange ett giltigt kategori-UUID."}
+            )
+
+        checklist = self.get_object()
+        species_added = checklists.add_category_species_to_checklist(
+            checklist=checklist,
+            category=category,
+        )
+        return Response(
+            {
+                "species_category_id": str(category.pk),
+                "species_added": species_added,
+                "species_count": checklist.items.count(),
+            }
+        )
 
     @action(
         detail=True,
