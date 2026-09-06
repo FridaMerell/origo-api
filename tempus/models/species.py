@@ -4,8 +4,13 @@ import uuid
 
 from django.conf import settings
 from django.contrib.postgres.indexes import BTreeIndex, GinIndex, OpClass
+from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+
+def default_species_category_stages():
+    return ["Puppa", "Nymf", "Larv", "Imago"]
 
 
 class Species(models.Model):
@@ -78,6 +83,11 @@ class SpeciesCategory(models.Model):
         through="SpeciesCategoryMembership",
         through_fields=("category", "species"),
     )
+    stages = ArrayField(
+        models.TextField(),
+        null=False,
+        default=default_species_category_stages,
+    )
 
     class Meta:
         ordering = ("label",)
@@ -85,6 +95,11 @@ class SpeciesCategory(models.Model):
 
     def __str__(self):
         return self.label or str(self.taxon_id)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.parent_category_id:
+            self.stages = self.parent_category.stages.copy()
+        return super().save(*args, **kwargs)
 
     def descendant_categories(self, *, include_self=False):
         """Walk the category tree without assuming a maximum nesting depth."""

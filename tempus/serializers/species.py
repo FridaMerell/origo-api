@@ -485,6 +485,7 @@ class SpeciesCategorySerializer(serializers.ModelSerializer):
             "species_memberships",
             "species_count",
             "taxon_id",
+            'stages'
         ]
         read_only_fields = ["id", "species", "species_memberships", "species_count"]
 
