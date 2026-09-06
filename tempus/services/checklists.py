@@ -189,6 +189,7 @@ def record_checklist_sighting(
     observed_at: datetime,
     location: dict[str, Any] | None = None,
     count: int | None = None,
+    life_stage: str | None = None,
     notes: str = "",
 ) -> Observation:
     """Create one observation and attach it to one or more checklist items."""
@@ -211,6 +212,7 @@ def record_checklist_sighting(
         observed_at=observed_at,
         location=location or {},
         count=count,
+        life_stage=life_stage,
         notes=notes,
     )
     observation.checklist_items.set(items)
