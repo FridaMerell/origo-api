@@ -1,6 +1,11 @@
 """Route planning views."""
-from datetime import timedelta
 
+from datetime import date, timedelta
+from http.client import HTTPResponse
+from re import split
+import re
+
+from django.http.request import HttpRequest
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -14,7 +19,7 @@ from tempus.serializers import (
     RouteSuggestionRunSerializer,
     SuggestedStopsQuerySerializer,
 )
-from tempus.models import Route, RouteStop, RouteSuggestionRun
+from tempus.models import Phenogram, Route, RouteStop, RouteSuggestionRun, Species
 from tempus.services import artdatabanken, route_planner
 
 
@@ -67,7 +72,9 @@ class RouteViewSet(viewsets.ModelViewSet):
         if request.method == "GET":
             if run is None:
                 return Response(
-                    {"detail": "No suggestion run for this route yet; POST to start one."},
+                    {
+                        "detail": "No suggestion run for this route yet; POST to start one."
+                    },
                     status=status.HTTP_404_NOT_FOUND,
                 )
             return Response(RouteSuggestionRunSerializer(run).data)
@@ -133,4 +140,23 @@ class RouteStopViewSet(viewsets.ModelViewSet):
     filterset_fields = ["route"]
 
     def get_queryset(self):
-        return RouteStop.objects.filter(route__user=self.request.user).select_related("route")
+        return RouteStop.objects.filter(route__user=self.request.user).select_related(
+            "route"
+        )
+
+
+def exploration_view(request: HttpRequest):
+    user = request.user
+    # lat = request.POST.get('lat')
+    # lon = request.POST.get('lon')
+    biotopes = split(",", request.POST.get("biotopes"))
+    landscape = split(",", request.POST.get("landscape"))
+    taxa_under = request.POST.get("taxa")
+
+    day_of_year = date.today().timetuple().tm_yday
+    in_season_phenograms = Phenogram.objects.filter(
+        geo_area=None, start_day_of_year__gt=day_of_year,
+        end_day_of_year__st=day_of_year
+    )
+
+    return HTTPResponse(status=200)

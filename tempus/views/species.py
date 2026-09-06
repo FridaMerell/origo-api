@@ -604,7 +604,7 @@ class SpeciesCategoryViewSet(SharedDataViewSet):
         "parent_category__label",
         "is_primary",
     ]
-    ordering = ["taxon_id", "label"]
+    ordering = [ "label","taxon_id"]
     lookup_field = "taxon_id"
 
     def get_queryset(self):
