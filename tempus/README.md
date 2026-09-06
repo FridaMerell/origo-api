@@ -78,7 +78,9 @@ Categories also form a tree through the nullable self-reference
 `parent_category` (`SET_NULL`, reverse `children`). `effective_species_ids()`
 returns the members of the category plus every descendant category, so a parent
 category resolves the union of its subtree. `is_primary` marks the categories a
-client should surface first.
+client should surface first. A category's `stages` lists the supported life
+stages. New child categories copy their parent's current stages when created;
+later parent edits do not rewrite existing children.
 
 ### SpeciesFollow
 
@@ -224,8 +226,8 @@ observations as needed.
 ### Observation
 
 `Observation` represents an observation registered by a Tempus user. It stores
-the species, time, GeoJSON point, optional count, and notes. It has an optional
-plain many-to-many to `ChecklistItem` (`checklist_items`, reverse
+the species, time, GeoJSON point, optional count, optional `life_stage`, and
+notes. It has an optional plain many-to-many to `ChecklistItem` (`checklist_items`, reverse
 `item.observations`). An observation can therefore exist independently or check
 off matching items in several checklists at once, and an item can have multiple
 observations.

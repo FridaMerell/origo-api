@@ -130,6 +130,11 @@ class SpeciesViewSet(SharedDataViewSet):
             .annotate(is_followed=Exists(followed))
             .prefetch_related(
                 Prefetch(
+                    "categories",
+                    queryset=SpeciesCategory.objects.only("id", "stages").order_by("label"),
+                    to_attr="life_stage_categories",
+                ),
+                Prefetch(
                     "checklist_items",
                     queryset=ChecklistItem.objects.filter(
                         checklist__user=user
@@ -430,6 +435,16 @@ class SpeciesViewSet(SharedDataViewSet):
             )
         except artdatabanken.ArtdatabankenAPIError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        category_stages = None
+        if under_taxon_id := params.validated_data.get("under_taxon_id"):
+            category_stages = (
+                SpeciesCategory.objects.filter(taxon_id=under_taxon_id)
+                .values_list("stages", flat=True)
+                .first()
+            )
+        if category_stages is not None:
+            for result in results:
+                result["stages"] = list(category_stages)
         return Response(results)
 
     @action(

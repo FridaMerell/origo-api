@@ -34,14 +34,29 @@ Categories form a tree: `parent_category` is a nullable self-reference
 a cycle. `is_primary` flags the main categories a client should surface first,
 and `image_url` holds an optional externally hosted illustration.
 
+Each category also has a `stages` array of supported life stages. A new child
+category copies its parent's current stages on creation. The copy is stored on
+the child, so later updates to a parent category's stages do not alter existing
+children.
+
 The API exposes both the direct members and the **effective** set:
 `effective_species_ids()` is every species assigned to the category or any of
 its descendants. The serializer returns `species` (effective ids),
-`species_memberships` (direct join rows), and `species_count` (effective size).
+`species_memberships` (direct join rows), `species_count` (effective size), and
+`stages`.
 The list endpoint returns a lighter payload than the detail view, is paginated,
 and is addressed by `taxon_id` rather than the UUID
 (`/api/tempus/species-categories/{taxon_id}/`). Filters: `taxon_id`,
 `parent_category`, `is_primary`.
+
+`GET /api/tempus/species/search/?q=...&under_taxon_id=<category-taxon-id>`
+also returns the selected category's `stages` on every search result, allowing
+a client to present the applicable life-stage choices while registering an
+observation.
+
+Regular species responses, including `GET /api/tempus/species/{taxon-id}/`,
+include `stages`: the unique combined life stages from every category to which
+the species belongs.
 
 `SpeciesFollow` is user-owned and unique per user/species. It stores priority,
 notification preference, notes, and creation time. API species representations
@@ -83,4 +98,3 @@ Artfakta failures do not block a Dyntaxa refresh. Missing taxonomy/API
 configuration returns 503; upstream API errors generally return 502.
 
 See [Artdatabanken APIs](artdatabanken/apis.md) for external operations.
-

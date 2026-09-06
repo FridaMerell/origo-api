@@ -35,8 +35,9 @@ derived from whether at least one observation is linked.
 ### Observation
 
 Contains owner, species, observed time, GeoJSON Point, optional positive count,
-notes, creation time, and zero or more checklist items. Species deletion is
-protected while observations reference it.
+optional `life_stage`, notes, creation time, and zero or more checklist items.
+`life_stage` is included in observation create, update, and read payloads.
+Species deletion is protected while observations reference it.
 
 ## Automatic completion
 

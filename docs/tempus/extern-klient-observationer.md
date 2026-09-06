@@ -13,6 +13,7 @@ Content-Type: application/json
   "observed_at": "2026-08-31T10:15:00+02:00",
   "location": { "type": "Point", "coordinates": [14.1567, 56.0294] },
   "count": 2,
+  "life_stage": "Imago",
   "notes": "Två individer ropade."
 }
 ```
@@ -22,7 +23,8 @@ eller Dyntaxa taxon-id. `location` är valfri; om den skickas ska den vara en
 GeoJSON Point med koordinater i ordningen longitud, latitud. Vid lyckat anrop
 returneras `201 Created`. Svaret, liksom `GET /api/tempus/observations/` och
 `GET /api/tempus/observations/{id}/`, innehåller även det skrivskyddade fältet
-`species_detail`:
+`species_detail`. Det valfria fältet `life_stage` kan användas för exempelvis
+`"Larv"`, `"Nymf"` eller `"Imago"` och returneras också i observationssvaret:
 
 ```json
 {

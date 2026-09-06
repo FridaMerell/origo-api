@@ -36,6 +36,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
     # Annotated per-request by SpeciesViewSet.get_queryset; False on writes.
     is_followed = serializers.BooleanField(read_only=True, default=False)
     checklists = serializers.SerializerMethodField()
+    stages = serializers.SerializerMethodField()
 
     class Meta:
         model = Species
@@ -44,6 +45,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
             "dyntaxa_taxon_id",
             "is_followed",
             "checklists",
+            "stages",
             "scientific_name",
             "swedish_name",
             "taxon_rank",
@@ -74,6 +76,15 @@ class SpeciesSerializer(serializers.ModelSerializer):
             }
             for item in getattr(obj, "user_checklist_items", [])
         ]
+
+    def get_stages(self, obj):
+        """Return the unique life stages available through this species' categories."""
+        stages = []
+        for category in getattr(obj, "life_stage_categories", obj.categories.all()):
+            for stage in category.stages:
+                if stage not in stages:
+                    stages.append(stage)
+        return stages
 
 
 class SpeciesResolveRequestSerializer(serializers.Serializer):
@@ -586,5 +597,6 @@ class SpeciesCategoryListSerializer(serializers.ModelSerializer):
             "species",
             "species_count",
             "taxon_id",
+            "stages",
         ]
         read_only_fields = ["id", "species", "species_count"]

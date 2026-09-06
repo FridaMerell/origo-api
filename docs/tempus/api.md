@@ -12,8 +12,8 @@ Authenticated reads; staff-only writes.
 
 | Path | Operations and filters |
 |---|---|
-| `species/` | CRUD; search names; filters include Dyntaxa ID, rank, active state, and category |
-| `species-categories/` | CRUD; URL lookup and detail addressed by `taxon_id`; filters `taxon_id`, `parent_category`, `is_primary`; ordering by `taxon_id`, `label`, `parent_category`, `parent_category__label`, `is_primary`; list is paginated and lighter than the detail payload |
+| `species/` | CRUD; search names; responses include aggregated `stages` from the species' categories; filters include Dyntaxa ID, rank, active state, and category |
+| `species-categories/` | CRUD; URL lookup and detail addressed by `taxon_id`; list and detail responses include `stages`; new children copy their parent's stages when created. Filters `taxon_id`, `parent_category`, `is_primary`; ordering by `taxon_id`, `label`, `parent_category`, `parent_category__label`, `is_primary`; list is paginated and lighter than the detail payload |
 | `phenophases/` | CRUD; filter `code` |
 | `sources/` | CRUD |
 | `geo-areas/` | CRUD; filters `kind`, `country_code`; list responses carry `Cache-Control: private, max-age=3600` |
@@ -22,7 +22,7 @@ Species actions:
 
 | Method and path | Purpose |
 |---|---|
-| `GET species/search/?q=...` | Search Dyntaxa; optional `under_taxon_id`, `limit` |
+| `GET species/search/?q=...` | Search Dyntaxa; optional `under_taxon_id`, `limit`. When `under_taxon_id` identifies a Tempus category, every result includes that category's `stages`. |
 | `POST species/resolve/` | Read-only bulk fetch: body `{ "ids": [<species-uuid>, ...] }` (max 100, unique); returns the matching cached species without touching state |
 | `POST species/register/` | Register one Dyntaxa taxon in a category |
 | `POST species/import-checklist/` | Queue multipart CSV import |
@@ -90,7 +90,7 @@ start their season 7-14 days later.
 | `route-stops/` | CRUD for current user's routes; `route` |
 | `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking. `POST {id}/sync-category/` adds all missing species from a category subtree. |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
-| `observations/` | CRUD for current user; `checklist_items`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name` |
+| `observations/` | CRUD for current user; `checklist_items`, optional `life_stage`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name` |
 | `birdnet-devices/` | CRUD for devices shared with current user |
 
 ### Synchronize a checklist category

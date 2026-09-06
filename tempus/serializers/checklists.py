@@ -274,6 +274,7 @@ class ObservationSerializer(serializers.ModelSerializer):
             "location",
             "checklist_names",
             "count",
+            "life_stage",
             "notes",
             "created_at",
         ]
