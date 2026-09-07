@@ -133,15 +133,22 @@ class ChecklistViewSet(viewsets.ModelViewSet):
 
 class ChecklistItemViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistItemSerializer
+    pagination_class = StandardPagination
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["checklist", "species"]
 
     def get_queryset(self):
-        return ChecklistItem.objects.filter(checklist__user=self.request.user).select_related("checklist", "species")
+        observations = Observation.objects.filter(checklist_items=OuterRef("pk"))
+        return (
+            ChecklistItem.objects.filter(checklist__user=self.request.user)
+            .select_related("checklist", "species")
+            .annotate(is_completed=Exists(observations))
+        )
 
 
 class ObservationViewSet(viewsets.ModelViewSet):
     serializer_class = ObservationSerializer
+    pagination_class = StandardPagination
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
     filterset_class = ObservationFilter

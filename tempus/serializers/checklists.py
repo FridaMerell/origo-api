@@ -181,7 +181,7 @@ class ChecklistSerializer(serializers.ModelSerializer):
 
 
 class ChecklistItemSerializer(serializers.ModelSerializer):
-    is_completed = serializers.SerializerMethodField()
+    is_completed = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = ChecklistItem
@@ -215,10 +215,6 @@ class ChecklistItemSerializer(serializers.ModelSerializer):
             checklist=item.checklist,
         )
         return item
-
-    def get_is_completed(self, obj):
-        return obj.observations.exists()
-
 
 class ChecklistRegisterItemSerializer(serializers.ModelSerializer):
     species_id = serializers.UUIDField(read_only=True)
