@@ -1,10 +1,12 @@
 """Background tasks for account-level notifications."""
 
 import logging
+from datetime import timedelta
 
 import requests
 from django.conf import settings
 from django.template.loader import render_to_string
+from django.utils import timezone
 from django_tasks import task
 
 from accounts.models import Notification
@@ -119,3 +121,28 @@ def send_web_push_for_notification(notification_pk):
     payload = build_notification_payload(notification)
     sent, dead = send_payload_to_user(notification.user, payload)
     return {"sent": sent, "dead": dead}
+
+
+WEB_PUSH_DEAD_RETENTION = timedelta(days=30)
+WEB_PUSH_PURGE_INTERVAL = timedelta(days=1)
+
+
+@task()
+def purge_dead_web_push_subscriptions():
+    """Delete deactivated push subscriptions past their retention, then reschedule.
+
+    Self-scheduling: each run re-enqueues itself ``WEB_PUSH_PURGE_INTERVAL``
+    later, so enqueueing it once (e.g. after deploy) keeps it running. Extra
+    enqueues are harmless - a run only deletes and reschedules.
+    """
+    from accounts.models import WebPushSubscription
+
+    cutoff = timezone.now() - WEB_PUSH_DEAD_RETENTION
+    deleted, _ = WebPushSubscription.objects.filter(
+        is_active=False, created_at__lt=cutoff
+    ).delete()
+    logger.info("purge_dead_web_push_subscriptions: deleted %d row(s)", deleted)
+
+    purge_dead_web_push_subscriptions.using(
+        run_after=WEB_PUSH_PURGE_INTERVAL
+    ).enqueue()

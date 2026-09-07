@@ -2,7 +2,7 @@
 import uuid
 from urllib.parse import urlsplit, urlunsplit
 
-from django.db.models import Exists, OuterRef, Subquery
+from django.db.models import Exists, OuterRef, Prefetch, Subquery
 from django_filters.rest_framework import CharFilter, FilterSet, UUIDFilter
 from rest_framework import permissions, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -150,7 +150,12 @@ class ObservationViewSet(viewsets.ModelViewSet):
         return (
             Observation.objects.filter(user=self.request.user)
             .select_related("species")
-            .prefetch_related("checklist_items")
+            .prefetch_related(
+                Prefetch(
+                    "checklist_items",
+                    queryset=ChecklistItem.objects.select_related("checklist"),
+                )
+            )
             .distinct()
         )
 
