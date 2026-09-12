@@ -13,6 +13,7 @@ routes, and short-lived BirdNET detections.
 - [Observations and checklists](observations-and-checklists.md)
 - [Species and taxonomy](species-and-taxonomy.md)
 - [Geography and GeoJSON](geography.md)
+- [Locales](observations-and-checklists.md#locales)
 - [Background tasks](background-tasks.md)
 - [Permissions](permissions.md)
 - [API index](api.md)

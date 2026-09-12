@@ -9,8 +9,29 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Max, Prefetch
 
-from tempus.models import Checklist, ChecklistItem, Observation, SpeciesCategory
+from tempus.models import Checklist, ChecklistItem, Locale, Observation, SpeciesCategory
 from tempus.services.geo import point_in_multipolygon
+
+
+def checklist_location_matches(*, checklist: Checklist, location: dict[str, Any]) -> bool:
+    """Return whether ``location`` satisfies a checklist's optional areas.
+
+    A locale and a GeoArea are alternative scopes. A checklist without either
+    remains unrestricted by location.
+    """
+    areas = (checklist.locale, checklist.geo_area)
+    if not any(areas):
+        return True
+
+    for area in areas:
+        if area is None:
+            continue
+        try:
+            if point_in_multipolygon(location, area.geometry):
+                return True
+        except (IndexError, KeyError, TypeError, ValueError):
+            continue
+    return False
 
 
 def matching_checklist_items(
@@ -25,7 +46,8 @@ def matching_checklist_items(
 
     Only checklist items with automatic adding enabled are considered. Matches
     require the same species, an observation date within the optional checklist
-    date range, and, when set, a location inside the checklist's geo area.
+    date range, and, when set, a location inside the checklist's Locale or
+    GeoArea.
     """
     observed_date = observed_at.date()
     items = (
@@ -34,7 +56,7 @@ def matching_checklist_items(
             species_id=species_id,
             checklist__auto_add=True,
         )
-        .select_related("checklist", "checklist__geo_area")
+        .select_related("checklist", "checklist__geo_area", "checklist__locale")
     )
     if checklist is not None:
         items = items.filter(checklist=checklist)
@@ -48,13 +70,8 @@ def matching_checklist_items(
             continue
         if end and observed_date > end:
             continue
-        if candidate.geo_area_id:
-            try:
-                if not point_in_multipolygon(location, candidate.geo_area.geometry):
-                    continue
-            except (IndexError, KeyError, TypeError, ValueError):
-                continue
-        matches.append(item)
+        if checklist_location_matches(checklist=candidate, location=location):
+            matches.append(item)
     return matches
 
 
@@ -81,7 +98,7 @@ def sync_observations_to_checklists(
     items = ChecklistItem.objects.filter(
         checklist__user_id=user.pk,
         checklist__auto_add=True,
-    ).select_related("checklist", "checklist__geo_area")
+    ).select_related("checklist", "checklist__geo_area", "checklist__locale")
     if checklist is not None:
         items = items.filter(checklist=checklist)
 
@@ -117,14 +134,11 @@ def sync_observations_to_checklists(
                 continue
             if candidate.end_date and observed_date > candidate.end_date:
                 continue
-            if candidate.geo_area_id:
-                try:
-                    if not point_in_multipolygon(
-                        observation.location, candidate.geo_area.geometry
-                    ):
-                        continue
-                except (IndexError, KeyError, TypeError, ValueError):
-                    continue
+            if not checklist_location_matches(
+                checklist=candidate,
+                location=observation.location,
+            ):
+                continue
             matches.append(item)
         if not matches:
             continue
@@ -190,6 +204,7 @@ def record_checklist_sighting(
     location: dict[str, Any] | None = None,
     count: int | None = None,
     life_stage: str | None = None,
+    locale: Locale | None = None,
     notes: str = "",
 ) -> Observation:
     """Create one observation and attach it to one or more checklist items."""
@@ -213,6 +228,7 @@ def record_checklist_sighting(
         location=location or {},
         count=count,
         life_stage=life_stage,
+        locale=locale,
         notes=notes,
     )
     observation.checklist_items.set(items)

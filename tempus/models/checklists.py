@@ -5,7 +5,9 @@ import uuid
 from django.conf import settings
 from django.db import models
 
-from .geography import GeoArea
+from apsis.tests import User
+
+from .geography import GeoArea, Locale
 from .routes import Route
 from .species import Species
 
@@ -22,6 +24,7 @@ class Checklist(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     auto_add = models.BooleanField(default=True)
+    locale=models.ForeignKey(Locale, null=True, on_delete=models.SET_NULL)
 
     class Meta:
         ordering = ("-created_at",)
@@ -59,7 +62,7 @@ class Observation(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     life_stage = models.TextField(null=True)
-
+    locale=models.ForeignKey(Locale, null=True, on_delete=models.SET_NULL)
     class Meta:
         ordering = ("-observed_at",)
         indexes = [models.Index(fields=("user", "observed_at"))]

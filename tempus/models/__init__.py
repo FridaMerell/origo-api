@@ -6,7 +6,7 @@ views, services, the admin site, and migrations.
 
 from .birdnet import BIRDNET_DETECTION_CHANNEL, BirdnetDetection, BirdnetDevice
 from .checklists import Checklist, ChecklistItem, Observation
-from .geography import GeoArea
+from .geography import GeoArea, Locale
 from .phenology import Phenogram, PhenogramGeneration
 from .reference import Phenophase, Source
 from .routes import Route, RouteStop, RouteSuggestionRun
@@ -19,6 +19,7 @@ __all__ = [
     "Checklist",
     "ChecklistItem",
     "GeoArea",
+    "Locale",
     "Observation",
     "Phenogram",
     "PhenogramGeneration",

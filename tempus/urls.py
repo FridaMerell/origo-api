@@ -7,7 +7,7 @@ from tempus.views.checklists import (
     ChecklistViewSet,
     ObservationViewSet,
 )
-from tempus.views.reference import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet
+from tempus.views.reference import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet, LocaleViewSet
 from tempus.views.routes import RouteStopViewSet, RouteViewSet
 from tempus.views.species import (
     PhenogramViewSet,
@@ -32,6 +32,7 @@ router.register("route-stops", RouteStopViewSet, basename="route-stop")
 router.register("checklists", ChecklistViewSet, basename="checklist")
 router.register("checklist-items", ChecklistItemViewSet, basename="checklist-item")
 router.register("observations", ObservationViewSet, basename="observation")
+router.register("locales", LocaleViewSet, basename='locale')
 
 urlpatterns = [
     path('', include(router.urls)),

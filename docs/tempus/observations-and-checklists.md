@@ -15,8 +15,21 @@ flowchart LR
     O --> S
     O <-->|many-to-many| I
     C -. optional .-> G[GeoArea]
+    C -. optional .-> L[Locale]
+    O -. classified by .-> L
     C -. optional .-> R[Route]
 ```
+
+### Locales
+
+A Locale is a user-owned named GeoJSON `MultiPolygon`. Clients manage their
+own locales through `/api/tempus/locales/`; the server supplies the `user`
+field, which is read-only. Locales use the same longitude/latitude coordinate
+order as every other GeoJSON value in Tempus.
+
+An observation's `locale` is read-only and is assigned from the current user's
+Locales when the observation is created. A checklist can use an optional Locale
+as a location scope, and it must belong to the checklist's owner.
 
 ### Checklist
 
@@ -59,9 +72,10 @@ One observation can complete matching items in several checklists. Updating an
 observation re-runs automatic linking. Creating or updating a checklist also
 backfills qualifying existing observations. Automatic linking requires
 `auto_add: true`, the same species, a date within the optional range, and—when
-the checklist has a `GeoArea`—a location inside that area's polygon. Explicit
-item lists are deduplicated, must all belong to the user, and must all refer to
-one species.
+the checklist has a `Locale` or `GeoArea`—a location inside either polygon. A
+checklist with neither area has no location restriction. Explicit item lists
+are deduplicated, must all belong to the user, and must all refer to one
+species.
 
 ## Checklist choices on species
 

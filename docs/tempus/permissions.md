@@ -12,6 +12,7 @@ stream uses the default session authentication (an `EventSource` cannot send an
 | Species, categories, phenophases, sources, GeoAreas | Authenticated users | Staff only |
 | Phenograms | Authenticated users | Read-only; builds through species actions |
 | Species follows | Current user's rows | Current user |
+| Locales | Current user's rows | Current user |
 | Routes and route stops | Current user's rows | Current user |
 | Checklists, items, observations | Current user's rows | Current user |
 | BirdNET devices | Device users | Device users, with house validation |
@@ -31,6 +32,8 @@ Related-field validation additionally prevents cross-owner references:
 
 - route stops and checklists cannot reference another user's route;
 - checklist items cannot reference another user's checklist;
+- a checklist cannot reference another user's Locale;
+- Locale ownership is assigned by the server and cannot be changed through the API;
 - observation checklist items must all belong to the user and match species;
 - a BirdNET device house must include the requesting user;
 - when a device has a house, submitted device users must be house members;
@@ -42,4 +45,3 @@ Cross-subdomain frontend requests use session cookies with credentialed CORS
 and CSRF trusted origins. Mutation requests must include the normal CSRF token.
 Device-side ingestion instead sends `Authorization: Token <key>` and does not
 use a browser session.
-

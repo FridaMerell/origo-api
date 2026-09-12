@@ -17,8 +17,9 @@ from tempus.serializers import (
     ChecklistSerializer,
     ObservationSerializer,
 )
-from tempus.models import Checklist, ChecklistItem, Observation, SpeciesCategory
+from tempus.models import Checklist, ChecklistItem, Observation, SpeciesCategory, Locale
 from tempus.services import checklists
+from tempus.services.geo import point_in_multipolygon, point_in_polygon
 
 
 class ObservationFilter(FilterSet):
@@ -69,10 +70,12 @@ class ChecklistRegisterPagination(StandardPagination):
 class ChecklistViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ["start_date", "geo_area", "route"]
+    filterset_fields = ["start_date", "geo_area", "route", "locale"]
 
     def get_queryset(self):
-        return Checklist.objects.filter(user=self.request.user).select_related("geo_area", "route")
+        return Checklist.objects.filter(user=self.request.user).select_related(
+            "geo_area", "route", "locale"
+        )
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -163,11 +166,20 @@ class ObservationViewSet(viewsets.ModelViewSet):
                     queryset=ChecklistItem.objects.select_related("checklist"),
                 )
             )
-            .distinct()
         )
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        locales = Locale.objects.filter(user=self.request.user)
+        observed_in = None
+        location = serializer.validated_data.get("location", {})
+        for locale in locales:
+            try:
+                if point_in_multipolygon(location, locale.geometry):
+                    observed_in = locale
+            except (IndexError, KeyError, TypeError, ValueError):
+                continue
+
+        serializer.save(user=self.request.user, locale=observed_in)
 
     @action(detail=False, methods=["post"], url_path="sync-checklists")
     def sync_checklists(self, request):

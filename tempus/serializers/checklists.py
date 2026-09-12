@@ -2,6 +2,7 @@
 from rest_framework import serializers
 
 from tempus.models import Checklist, ChecklistItem, Observation, Species, SpeciesCategory
+from tempus.models.checklists import Locale
 from tempus.services.checklists import (
     link_observation_to_checklists,
     record_checklist_sighting,
@@ -51,6 +52,7 @@ class ChecklistSerializer(serializers.ModelSerializer):
             "species_category_taxon_ids",
             "created_at",
             "updated_at",
+            "locale"
         ]
         read_only_fields = ["id", "user", "created_at", "updated_at"]
 
@@ -172,6 +174,11 @@ class ChecklistSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("The route does not belong to you.")
         return route
 
+    def validate_locale(self, locale):
+        if locale is not None and locale.user_id != self.context["request"].user.pk:
+            raise serializers.ValidationError("The locale does not belong to you.")
+        return locale
+
     def backfill_observations(self, checklist):
         """Link qualifying existing observations to this checklist's items."""
         sync_observations_to_checklists(
@@ -251,6 +258,7 @@ class ObservationSpeciesDetailSerializer(serializers.ModelSerializer):
 
 class ObservationSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+    locale = serializers.PrimaryKeyRelatedField(read_only=True)
     species = SpeciesReferenceField(
         queryset=Species.objects.all(),
         style={"base_template": "input.html"},
@@ -271,6 +279,7 @@ class ObservationSerializer(serializers.ModelSerializer):
             "species",
             "species_detail",
             "checklist_items",
+            "locale",
             "observed_at",
             "location",
             "checklist_names",
@@ -325,3 +334,4 @@ class ObservationSerializer(serializers.ModelSerializer):
             instance.checklist_items.set(items)
         link_observation_to_checklists(instance)
         return instance
+

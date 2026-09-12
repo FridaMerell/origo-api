@@ -1,7 +1,11 @@
 """Read-mostly reference-data views: phenophases, sources, and geo areas."""
+from rest_framework import viewsets
+
+from tempus import models
 from tempus.api.common import SharedDataViewSet
-from tempus.models import GeoArea, Phenophase, Source
+from tempus.models import GeoArea, Locale, Phenophase, Source
 from tempus.serializers import GeoAreaSerializer, PhenophaseSerializer, SourceSerializer
+from tempus.serializers.geography import LocaleSerializer
 
 
 class PhenophaseViewSet(SharedDataViewSet):
@@ -24,3 +28,13 @@ class GeoAreaViewSet(SharedDataViewSet):
         response = super().list(request, *args, **kwargs)
         response["Cache-Control"] = "private, max-age=3600"
         return response
+
+class LocaleViewSet(viewsets.ModelViewSet):
+    serializer_class=LocaleSerializer
+
+    def get_queryset(self):
+        return Locale.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        return serializer.save(user=self.request.user)
+

@@ -71,10 +71,48 @@ The `201` body (and every streamed event) carries the resolved taxon as
 
 Endpoint: `GET /api/birdnet/detections/stream` (no trailing slash).
 
-Server-Sent Events over the normal frontend session (`EventSource` sends the
-session cookie; no token, no extra headers). The stream is always scoped to
-`request.user -> BirdnetDevice.users` - a client only ever receives detections
-from devices attached to the requesting user. There is no global stream.
+### Authentication
+
+The stream uses the normal Django/DRF browser session and requires an
+authenticated user. It does not use the BirdNET device token from the ingest
+endpoint. Native `EventSource` cannot set an `Authorization` header, and a
+token must not be put in the URL.
+
+For a same-origin frontend, the browser sends the session cookie
+automatically:
+
+```js
+const stream = new EventSource("/api/birdnet/detections/stream");
+```
+
+When the frontend and API use different origins, including different
+subdomains, opt in to credentialed requests explicitly:
+
+```js
+const stream = new EventSource(
+  "https://api.example.com/api/birdnet/detections/stream",
+  { withCredentials: true },
+);
+```
+
+The API origin must allow the frontend origin in `CORS_ALLOWED_ORIGINS`, and
+`CORS_ALLOW_CREDENTIALS` must be enabled. The session cookie is `HttpOnly`, so
+frontend code does not read or copy it; the browser attaches it. No CSRF token
+is required because opening the stream is a read-only `GET` request.
+
+Open the stream only after login has established the session. A missing,
+expired, or invalid session is rejected before streaming begins with an
+authentication error (`401` or `403`, depending on the active DRF
+authenticators). Native `EventSource` exposes this through its `error` event,
+not the response body. Close that instance, re-establish the session, and
+create a new `EventSource` rather than allowing an unauthenticated connection
+to retry indefinitely.
+
+After authentication, the stream is always scoped to
+`request.user -> BirdnetDevice.users`: a client only ever receives detections
+from devices attached to the requesting user. There is no global stream, and
+the client cannot request another user's or device's detections through query
+parameters.
 
 Content negotiation is bypassed on this view, so any `Accept` header (or none)
 is served the stream rather than a `406`.
@@ -124,4 +162,3 @@ Because each connection holds a worker/thread for its lifetime, serve this
 endpoint from a deployment that streams responses (async server or a dedicated
 pool) and expect proxies to need response buffering disabled - the view already
 sends `X-Accel-Buffering: no` and `Cache-Control: no-cache`.
-

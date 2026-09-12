@@ -88,6 +88,7 @@ start their season 7-14 days later.
 | `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled`. `DELETE species-follows/unfollow/?species=<dyntaxa-id>` removes the caller's follow addressed by Dyntaxa taxon id (`204`, or `404` if not followed) |
 | `routes/` | CRUD for current user; `planned_date` |
 | `route-stops/` | CRUD for current user's routes; `route` |
+| `locales/` | CRUD for current user; `name` and GeoJSON `MultiPolygon`. The server sets the read-only `user` field. |
 | `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking. `POST {id}/sync-category/` adds all missing species from a category subtree. |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
 | `observations/` | CRUD for current user; `checklist_items`, optional `life_stage`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name` |

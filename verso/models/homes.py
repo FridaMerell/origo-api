@@ -4,6 +4,8 @@ from django.conf import settings
 from django.db import models
 from django.contrib.postgres.fields import ArrayField
 
+def default_modules():
+    return ["bookings","weather"]
 class House(models.Model):
     name = models.CharField(max_length=255)
     address = models.CharField(max_length=255, blank=True)
@@ -12,6 +14,7 @@ class House(models.Model):
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="houses")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    modules = ArrayField(models.TextField(), null=True, default=default_modules)
 
     def __str__(self):
         return self.name

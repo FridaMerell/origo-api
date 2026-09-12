@@ -4,6 +4,9 @@ import uuid
 
 from django.db import models
 
+from accounts.models import User
+
+
 
 class GeoArea(models.Model):
     class Kind(models.TextChoices):
@@ -25,3 +28,12 @@ class GeoArea(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.get_kind_display()})"
+
+
+
+
+class Locale(models.Model):
+    name=models.TextField()
+    geometry=models.JSONField(default=dict)
+    user=models.ForeignKey(User, on_delete=models.CASCADE)
+    
