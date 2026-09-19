@@ -7,7 +7,16 @@ from tempus.views.checklists import (
     ChecklistViewSet,
     ObservationViewSet,
 )
-from tempus.views.reference import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet, LocaleViewSet
+from tempus.views.reference import (
+    AdministrativeBoundaryViewSet,
+    CountryOverviewView,
+    GeoAreaViewSet,
+    LandCoverByTypeViewSet,
+    LandCoverViewSet,
+    LocaleViewSet,
+    PhenophaseViewSet,
+    SourceViewSet,
+)
 from tempus.views.routes import RouteStopViewSet, RouteViewSet
 from tempus.views.species import (
     PhenogramViewSet,
@@ -26,6 +35,13 @@ router.register("species-follows", SpeciesFollowViewSet, basename="species-follo
 router.register("phenophases", PhenophaseViewSet, basename="phenophase")
 router.register("sources", SourceViewSet, basename="source")
 router.register("geo-areas", GeoAreaViewSet, basename="geo-area")
+router.register("land-cover", LandCoverViewSet, basename="land-cover")
+router.register("land-cover-by-type", LandCoverByTypeViewSet, basename="land-cover-by-type")
+router.register(
+    "administrative-boundaries",
+    AdministrativeBoundaryViewSet,
+    basename="administrative-boundary",
+)
 router.register("phenograms", PhenogramViewSet, basename="phenogram")
 router.register("routes", RouteViewSet, basename="route")
 router.register("route-stops", RouteStopViewSet, basename="route-stop")
@@ -35,5 +51,6 @@ router.register("observations", ObservationViewSet, basename="observation")
 router.register("locales", LocaleViewSet, basename='locale')
 
 urlpatterns = [
+    path('country-overview/', CountryOverviewView.as_view(), name='country-overview'),
     path('', include(router.urls)),
 ]

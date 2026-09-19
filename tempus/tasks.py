@@ -25,9 +25,12 @@ from django.db import transaction
 from django.utils import timezone
 from django_tasks import task
 
-from tempus.services import artdatabanken, phenogram, route_planner
+from tempus.services import artdatabanken, lantmateriet, phenogram, route_planner
+from tempus.services.locale_sources import SOURCES
 
 logger = logging.getLogger(__name__)
+
+LOCALE_LAND_COVER_BUFFER_METRES = 5000
 
 
 def _has_swedish_name(species) -> bool:
@@ -446,6 +449,95 @@ def compute_route_suggestions(route_pk):
     run.save(update_fields=["status", "result", "finished_at"])
     logger.info(
         "compute_route_suggestions(%s): %d stop(s)", route_pk, len(stops)
+    )
+
+
+@task()
+def fetch_locale_land_cover(locale_pk, *, buffer_metres=LOCALE_LAND_COVER_BUFFER_METRES):
+    """Prefetch this Locale's padded area from every source in ``locale_sources.SOURCES``.
+
+    One ``LandCoverFetch`` row per Locale (like ``RouteSuggestionRun`` per
+    Route): the result is overwritten in place on every run. The fetched area
+    is the Locale's own bounding box padded by ``buffer_metres`` in every
+    direction, separate from and not consumed by the existing exact-boundary
+    ``/locales/{id}/land-cover/map/`` endpoint. All sources are fetched
+    together as one unit: either every field is refreshed, or - on failure -
+    none of the previous results are overwritten. The padded bbox/geometry
+    below is computed once (``lantmateriet.buffered_bbox``) and shared across
+    every source's fetch call.
+
+    Skips both calls when the previous successful fetch's area already covers
+    the locale's current padded bounding box, so a save that does not move
+    the boundary (renaming, editing an unrelated field) does not re-fetch data
+    it already has. A boundary edit that grows or shifts the box always
+    leaves some of the new box uncovered, so it always re-fetches.
+    """
+    from shapely.geometry import box, mapping, shape
+
+    from tempus.models import LandCoverFetch, Locale
+
+    locale = Locale.objects.filter(pk=locale_pk).first()
+    if locale is None:
+        return
+    fetch, _ = LandCoverFetch.objects.get_or_create(locale=locale)
+
+    bbox = lantmateriet.buffered_bbox(locale.geometry, buffer_metres)
+    needed_shape = box(*bbox)
+    if fetch.status == LandCoverFetch.SUCCEEDED and fetch.geometry:
+        try:
+            already_covered = shape(fetch.geometry).covers(needed_shape)
+        except (TypeError, ValueError, KeyError):
+            already_covered = False
+        if already_covered:
+            logger.info(
+                "fetch_locale_land_cover(%s): already covers the current area, skipping",
+                locale_pk,
+            )
+            return
+
+    fetch.status = LandCoverFetch.RUNNING
+    fetch.buffer_metres = buffer_metres
+    fetch.started_at = timezone.now()
+    fetch.error = ""
+    fetch.save(update_fields=["status", "buffer_metres", "started_at", "error"])
+
+    needed_geometry = mapping(needed_shape)
+    try:
+        results = {
+            source.field: source.fetch(needed_geometry, bbox) for source in SOURCES
+        }
+    except (
+        lantmateriet.LantmaterietConfigurationError,
+        lantmateriet.LantmaterietAPIError,
+    ) as exc:
+        fetch.status = LandCoverFetch.FAILED
+        fetch.error = str(exc)
+        fetch.finished_at = timezone.now()
+        fetch.save(update_fields=["status", "error", "finished_at"])
+        logger.warning("fetch_locale_land_cover(%s) failed: %s", locale_pk, exc)
+        return
+    except Exception as exc:
+        fetch.status = LandCoverFetch.FAILED
+        fetch.error = f"{type(exc).__name__}: {exc}"
+        fetch.finished_at = timezone.now()
+        fetch.save(update_fields=["status", "error", "finished_at"])
+        raise
+
+    fetch.geometry = needed_geometry
+    fetch.status = LandCoverFetch.SUCCEEDED
+    for field, value in results.items():
+        setattr(fetch, field, value)
+    fetch.finished_at = timezone.now()
+    fetch.save(
+        update_fields=["geometry", "status", "finished_at", *results.keys()]
+    )
+    logger.info(
+        "fetch_locale_land_cover(%s): %s",
+        locale_pk,
+        ", ".join(
+            f"{len(results[source.field].get('features', []))} {source.key}"
+            for source in SOURCES
+        ),
     )
 
 

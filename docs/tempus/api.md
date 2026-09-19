@@ -85,13 +85,17 @@ start their season 7-14 days later.
 
 | Path | Operations and filters |
 |---|---|
-| `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled`. `DELETE species-follows/unfollow/?species=<dyntaxa-id>` removes the caller's follow addressed by Dyntaxa taxon id (`204`, or `404` if not followed) |
+| `species-follows/` | CRUD for current user; `species`, `priority`, `notifications_enabled`. `GET species-follows/my_follows/` returns the caller's follows unpaginated (same queryset as the list endpoint). `DELETE species-follows/unfollow/?species=<dyntaxa-id>` removes the caller's follow addressed by Dyntaxa taxon id (`204`, or `404` if not followed) |
 | `routes/` | CRUD for current user; `planned_date` |
 | `route-stops/` | CRUD for current user's routes; `route` |
-| `locales/` | CRUD for current user; `name` and GeoJSON `MultiPolygon`. The server sets the read-only `user` field. |
-| `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`; `auto_add` controls automatic observation linking. `POST {id}/sync-category/` adds all missing species from a category subtree. |
+| `locales/` | CRUD for current user; `name` and GeoJSON `MultiPolygon`. The server sets the read-only `user` field. Includes `GET {id}/land-cover/`, `GET {id}/land-cover/map/`, `GET {id}/land-cover/fetch/` (status of the background land-cover + hydrography + place-name + building prefetch for the Locale + 5 km padding; see [land-cover-fetch-handoff.md](land-cover-fetch-handoff.md)), `GET {id}/administrative-boundaries/`, `GET {id}/place-names/` (nearest Ortnamn Direkt place name to a point), `GET {id}/place-names/search/` (name/county/municipality search kept to points inside the Locale), `GET {id}/buildings/` (OpenStreetMap building footprints, exactly clipped to the Locale), and `GET {id}/roads/` (Trafikverket road segments, exactly clipped to the Locale); see [Lantmäteriet marktäcke](lantmateriet-marktacke.md), [Lantmäteriet Ortnamn Direkt](lantmateriet-ortnamn.md), [OpenStreetMap buildings](openstreetmap-buildings.md), and [Trafikverket roads](trafikverket-roads.md). |
+| `administrative-boundaries/` | Viewport-based Lantmäteriet municipality, county, and country GeoJSON layer; it requires `bbox=minLon,minLat,maxLon,maxLat` and accepts optional `kinds=municipality,county,country`. See [Lantmäteriet documentation](lantmateriet-marktacke.md). |
+| `land-cover/` | Viewport-based Lantmäteriet land-cover and wetland GeoJSON layer. Requires `bbox=minLon,minLat,maxLon,maxLat`; optional `kinds=land_cover,wetland`. Lantmäteriet only — no CORINE or other fallback. See [Lantmäteriet documentation](lantmateriet-marktacke.md). |
+| `land-cover-by-type/` | Viewport-based Lantmäteriet land-cover layer filtered to specific `objekttyp` values, filtered server-side by Lantmäteriet (CQL2), not fetched in full and filtered locally. Requires `bbox=minLon,minLat,maxLon,maxLat` and `types=<objekttyp>,<objekttyp>,...` (exact, case-sensitive values, e.g. `types=Barr- och blandskog,Åker`); optional `kinds=land_cover,wetland`. Same viewport-size limit as `land-cover/`'s full-detail tier; no degraded fallback. See [Lantmäteriet documentation](lantmateriet-marktacke.md). |
+| `country-overview/` | Static, pre-generated whole-country overview: `basemap` (OpenFreeMap style/initial view), generalised `outline`, major `waterways`, and `cities`. Regenerated offline via `manage.py generate_country_overview`, not fetched live. `503` if not yet generated. See [Lantmäteriet documentation](lantmateriet-marktacke.md). |
+| `checklists/` | CRUD for current user; `start_date`, `geo_area`, `route`, `locale`; `auto_add` controls automatic observation linking. `POST {id}/sync-category/` adds all missing species from a category subtree. `GET {id}/register/` returns paginated checklist-item rows (see [Observations and checklists](observations-and-checklists.md#checklist-register-rows)). |
 | `checklist-items/` | CRUD for current user's checklists; `checklist`, `species` |
-| `observations/` | CRUD for current user; `checklist_items`, optional `life_stage`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name` |
+| `observations/` | CRUD for current user; `checklist_items`, `locale`, optional `life_stage`, and `species` (accepts either a Species UUID or a Dyntaxa taxon id). GET responses include read-only `species_detail` with `dyntaxa_taxon_id` and `swedish_name`, and `checklist_names` (the names of every linked checklist). `GET observations/by-category/` lists the caller's actual observation category groups (paginated, count-only); `GET observations/by-category/{categoryId}/` returns one category's observations, paginated; `POST observations/sync-checklists/` re-links the caller's existing observations to any checklist items they newly satisfy and returns `{"observations_linked", "checklist_item_links_created"}`. |
 | `birdnet-devices/` | CRUD for devices shared with current user |
 
 ### Synchronize a checklist category
@@ -130,7 +134,12 @@ See [BirdNET API](birdnet/api.md).
 - `401`: missing/invalid authentication.
 - `403`: authenticated but staff/action permission denied.
 - `404`: missing object or object outside the user's scoped queryset.
-- `502`: upstream Artdatabanken API failure exposed by a synchronous action.
+- `413`: a Lantmäteriet map/viewport layer exceeded the configured feature
+  safety limit; see [Lantmäteriet documentation](lantmateriet-marktacke.md).
+- `429`: a Lantmäteriet endpoint was rate-limited upstream; the response
+  forwards `Retry-After` when Lantmäteriet supplied one.
+- `502`: upstream Artdatabanken or Lantmäteriet API failure exposed by a
+  synchronous action.
 - `503`: missing external API configuration.
 
 This page is an index, not a replacement for serializer-specific contracts.

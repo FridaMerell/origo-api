@@ -48,9 +48,10 @@ derived from whether at least one observation is linked.
 ### Observation
 
 Contains owner, species, observed time, GeoJSON Point, optional positive count,
-optional `life_stage`, notes, creation time, and zero or more checklist items.
-`life_stage` is included in observation create, update, and read payloads.
-Species deletion is protected while observations reference it.
+optional `life_stage`, notes, creation time, read-only `locale`, and zero or
+more checklist items. `life_stage` is included in observation create, update,
+and read payloads. Species deletion is protected while observations reference
+it.
 
 ## Automatic completion
 
@@ -165,18 +166,21 @@ the category.
 ## API
 
 - `/api/tempus/checklists/`: user-scoped CRUD; filters `start_date`, `geo_area`,
-  and `route`. Responses include `auto_add` and derived `species_count`.
+  `route`, and `locale`. Responses include `auto_add` and derived
+  `species_count`.
 - `POST /api/tempus/checklists/{checklistId}/sync-category/`: adds every missing
   species in a category and its subcategories. Send
   `{"species_category_id": "<category-uuid>"}`. Existing checklist items are
   retained; the response includes `species_added` and the new `species_count`.
 - `/api/tempus/checklist-items/`: user-scoped CRUD; filters `checklist` and
   `species`.
-- `/api/tempus/observations/`: user-scoped CRUD; filters `checklist_items` and
-  `species`. The `species` filter accepts either a Species UUID or a Dyntaxa
-  taxon id; `species` in the request body accepts the same two forms. `GET`
-  list and detail responses include the read-only `species_detail` object with
-  the species' `dyntaxa_taxon_id` and `swedish_name`.
+- `/api/tempus/observations/`: user-scoped CRUD; filters `checklist_items`,
+  `locale`, and `species`. The `species` filter accepts either a Species UUID
+  or a Dyntaxa taxon id; `species` in the request body accepts the same two
+  forms. `GET` list and detail responses include the read-only `species_detail`
+  object with the species' `dyntaxa_taxon_id` and `swedish_name`, and a
+  read-only `checklist_names` list with the names of every checklist the
+  observation is currently linked to.
 
 Example observation:
 
@@ -200,7 +204,8 @@ Example response:
   "species_detail": {
     "dyntaxa_taxon_id": 102822,
     "swedish_name": "Koltrast"
-  }
+  },
+  "checklist_names": ["Spring birds"]
 }
 ```
 

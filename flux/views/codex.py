@@ -11,6 +11,7 @@ from flux.codex_plans import (
     get_private_project_plan_for_user,
     import_project_plan_for_user,
     list_private_project_plans_for_user,
+    update_document_in_private_project,
 )
 
 
@@ -62,6 +63,22 @@ class CodexProjectTaskCreateView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(task, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectDocumentUpdateView(APIView):
+    """Partially update one document in place within an existing private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, document_id):
+        try:
+            document = update_document_in_private_project(
+                request.user, project_id, document_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(document)
 
 
 class CodexProjectPlanAppendView(APIView):

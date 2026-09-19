@@ -1,6 +1,7 @@
 from django.contrib import admin
 import tempus.models
 from origo.admin import site
+from tempus.services.locale_sources import SOURCES
 from tempus.services.checklists import (
     link_observation_to_checklists,
     sync_observations_to_checklists,
@@ -83,3 +84,50 @@ class ObservationAdmin(admin.ModelAdmin):
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
         link_observation_to_checklists(form.instance)
+
+@admin.register(tempus.models.Locale, site=site)
+class LocaleAdmin(admin.ModelAdmin):
+    list_display=('id','name')
+    readonly_fields=('id',)
+
+@admin.register(tempus.models.LandCoverFetch, site=site)
+class LandCoverFetchAdmin(admin.ModelAdmin):
+    """Four raw JSON feature collections live on this model (``result``,
+    ``hydrography``, ``place_names``, ``buildings``) and can each run to
+    hundreds of features - shown as counts in the list, and tucked into a
+    collapsed fieldset on the detail page so opening one row doesn't dump
+    several JSON blobs onto the screen by default.
+    """
+
+    list_display = (
+        "id", "locale", "status", "buffer_metres", "layer_counts",
+        "created_at", "started_at", "finished_at",
+    )
+    list_filter = ("status",)
+    search_fields = ("locale__name", "locale__user__username")
+    list_select_related = ("locale",)
+    readonly_fields = ("id", "created_at", "started_at", "finished_at")
+
+    fieldsets = (
+        (None, {
+            "fields": ("id", "locale", "status", "buffer_metres", "error"),
+        }),
+        ("Tidsstämplar", {
+            "fields": ("created_at", "started_at", "finished_at"),
+        }),
+        ("Rådata (stora JSON-svar)", {
+            "classes": ("collapse",),
+            "fields": ("geometry", *(source.field for source in SOURCES)),
+            "description": (
+                "Fullständiga Lantmäteriet-svar. Se antal per lager i listan "
+                "ovan innan du öppnar det här."
+            ),
+        }),
+    )
+
+    @admin.display(description="Features per lager")
+    def layer_counts(self, obj):
+        return ", ".join(
+            f"{source.label}: {len(getattr(obj, source.field).get('features', []))}"
+            for source in SOURCES
+        )

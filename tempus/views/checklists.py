@@ -2,7 +2,7 @@
 import uuid
 from urllib.parse import urlsplit, urlunsplit
 
-from django.db.models import Exists, OuterRef, Prefetch, Subquery
+from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery
 from django_filters.rest_framework import CharFilter, FilterSet, UUIDFilter
 from rest_framework import permissions, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -17,7 +17,14 @@ from tempus.serializers import (
     ChecklistSerializer,
     ObservationSerializer,
 )
-from tempus.models import Checklist, ChecklistItem, Observation, SpeciesCategory, Locale
+from tempus.models import (
+    Checklist,
+    ChecklistItem,
+    Locale,
+    Observation,
+    SpeciesCategory,
+    SpeciesCategoryMembership,
+)
 from tempus.services import checklists
 from tempus.services.geo import point_in_multipolygon, point_in_polygon
 
@@ -31,7 +38,7 @@ class ObservationFilter(FilterSet):
 
     class Meta:
         model = Observation
-        fields = ["species", "checklist_items"]
+        fields = ["species", "checklist_items", "locale"]
 
     def filter_species(self, queryset, name, value):
         value = value.strip()
@@ -69,6 +76,7 @@ class ChecklistRegisterPagination(StandardPagination):
 
 class ChecklistViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistSerializer
+    pagination_class = StandardPagination
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["start_date", "geo_area", "route", "locale"]
 
@@ -138,7 +146,7 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistItemSerializer
     pagination_class = StandardPagination
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ["checklist", "species"]
+    filterset_fields = ["checklist", "species", "is_completed"]
 
     def get_queryset(self):
         observations = Observation.objects.filter(checklist_items=OuterRef("pk"))
@@ -147,6 +155,7 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
             .select_related("checklist", "species")
             .annotate(is_completed=Exists(observations))
         )
+
 
 
 class ObservationViewSet(viewsets.ModelViewSet):
@@ -180,6 +189,110 @@ class ObservationViewSet(viewsets.ModelViewSet):
                 continue
 
         serializer.save(user=self.request.user, locale=observed_in)
+
+    @action(detail=False, methods=["get"], url_path="by-category")
+    def by_category(self, request):
+        """Return a paginated, count-only list of actual category groups."""
+        grouped = (
+            self.filter_queryset(self.get_queryset())
+            .order_by()
+            .filter(species__category_memberships__isnull=False)
+            .values(
+                "species__category_memberships__category_id",
+                "species__category_memberships__category__label",
+                "species__category_memberships__category__taxon_id",
+                "species__category_memberships__category__image_url",
+                "species__category_memberships__category__is_primary",
+            )
+            .annotate(obs_count=Count("pk", distinct=True))
+            .order_by(
+                "-species__category_memberships__category__is_primary",
+                "species__category_memberships__category__label",
+                "species__category_memberships__category__taxon_id",
+                "species__category_memberships__category_id",
+            )
+        )
+        groups = [
+            {
+                "category": {
+                    "id": str(row["species__category_memberships__category_id"]),
+                    "label": row["species__category_memberships__category__label"],
+                    "taxon_id": row["species__category_memberships__category__taxon_id"],
+                    "image_url": row["species__category_memberships__category__image_url"],
+                    "is_primary": row[
+                        "species__category_memberships__category__is_primary"
+                    ],
+                },
+                "obs_count": row["obs_count"],
+            }
+            for row in grouped
+        ]
+        page = self.paginate_queryset(groups)
+        return self.get_paginated_response(page)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-category/(?P<category_id>[^/.]+)",
+    )
+    def category_observations(self, request, category_id=None):
+        """Return one actual category's observations, paginated."""
+        try:
+            category = SpeciesCategory.objects.get(pk=uuid.UUID(str(category_id)))
+        except (SpeciesCategory.DoesNotExist, ValueError, TypeError, AttributeError):
+            raise ValidationError({"category_id": "Ange ett giltigt kategori-UUID."})
+
+        observations = self.filter_queryset(self.get_queryset()).filter(
+            species__category_memberships__category=category
+        ).distinct()
+        page = self.paginate_queryset(observations)
+        memberships_by_species = {}
+        for (
+            species_id,
+            attached_category_id,
+            label,
+            taxon_id,
+            image_url,
+            is_primary,
+        ) in (
+            SpeciesCategoryMembership.objects.filter(
+                species_id__in={observation.species_id for observation in page}
+            )
+            .values_list(
+                "species_id",
+                "category_id",
+                "category__label",
+                "category__taxon_id",
+                "category__image_url",
+                "category__is_primary",
+            )
+            .order_by("category__label", "category__taxon_id", "category_id")
+        ):
+            memberships_by_species.setdefault(species_id, []).append(
+                {
+                    "id": str(attached_category_id),
+                    "label": label,
+                    "taxon_id": taxon_id,
+                    "image_url": image_url,
+                    "is_primary": is_primary,
+                }
+            )
+        serialized = self.get_serializer(page, many=True).data
+        for observation, payload in zip(page, serialized):
+            payload["species_categories"] = memberships_by_species.get(
+                observation.species_id, []
+            )
+
+        response = self.get_paginated_response(serialized)
+        response.data["category"] = {
+            "id": str(category.pk),
+            "label": category.label,
+            "taxon_id": category.taxon_id,
+            "image_url": category.image_url,
+            "is_primary": category.is_primary,
+        }
+        response.data["obs_count"] = response.data["count"]
+        return response
 
     @action(detail=False, methods=["post"], url_path="sync-checklists")
     def sync_checklists(self, request):

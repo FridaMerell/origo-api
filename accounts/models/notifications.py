@@ -6,7 +6,12 @@ from .identity import User
 
 
 class Notification(models.Model):
-    DOMAIN_CHOICES = [("verso", "Verso"), ("flux", "Flux"), ("tempus", "Tempus")]
+    DOMAIN_CHOICES = [
+        ("verso", "Verso"),
+        ("flux", "Flux"),
+        ("tempus", "Tempus"),
+        ("apsis", "Apsis"),
+    ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES)

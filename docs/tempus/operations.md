@@ -48,7 +48,10 @@ second instead.
 | `TASKS_BACKEND` | django-tasks backend |
 
 Artdatabanken variables are listed in
-[authentication and configuration](artdatabanken/authentication.md).
+[authentication and configuration](artdatabanken/authentication.md). Lantmäteriet
+Marktäcke/Hydrografi/administrative-boundary and Ortnamn Direkt variables are
+listed in [lantmateriet-marktacke.md](lantmateriet-marktacke.md#authentication-and-configuration)
+and [lantmateriet-ortnamn.md](lantmateriet-ortnamn.md#authentication-and-configuration).
 
 ## Authentication paths
 
@@ -80,6 +83,7 @@ Artdatabanken variables are listed in
 | `python manage.py resync_species` | Refresh stale/selected species cache |
 | `python manage.py resync_phenograms` | Queue stale/selected curve rebuilds |
 | `python manage.py fake_birdnet_detections` | Generate local BirdNET test data |
+| `python manage.py generate_country_overview` | Regenerate the static whole-country overview file served by `country-overview/`; see [Lantmäteriet documentation](lantmateriet-marktacke.md#whole-country-overview) |
 
 Run commands deliberately in the intended environment. Fake-data generation is
 for development and produces ordinary rows that later qualify for retention

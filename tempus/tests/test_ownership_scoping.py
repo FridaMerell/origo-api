@@ -130,7 +130,8 @@ class ChecklistOwnershipTests(APITestCase):
 
         response = client.get('/api/tempus/checklists/')
 
-        self.assertEqual(response.data, [])
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
 
     def test_stranger_cannot_add_an_item_to_someone_elses_checklist(self):
         client = APIClient()
@@ -319,6 +320,102 @@ class LocaleObservationTests(APITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["locale"], self.owner_locale.pk)
+
+    def test_listing_observations_filters_before_paginating_by_locale(self):
+        second_locale = Locale.objects.create(
+            user=self.owner,
+            name="Forest",
+            geometry=LOCALE_SQUARE,
+        )
+        for index in range(25):
+            Observation.objects.create(
+                user=self.owner,
+                species=self.species,
+                observed_at=datetime(2026, 9, 12, 11, index, tzinfo=timezone.utc),
+                location={"type": "Point", "coordinates": [17.5, 59.5]},
+                locale=self.owner_locale,
+            )
+        Observation.objects.create(
+            user=self.owner,
+            species=self.species,
+            observed_at=datetime(2026, 9, 12, 12, tzinfo=timezone.utc),
+            location={"type": "Point", "coordinates": [17.5, 59.5]},
+            locale=second_locale,
+        )
+
+        first_page = self.client.get(
+            f"/api/tempus/observations/?locale={self.owner_locale.pk}&page=1&page_size=25"
+        )
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.data["count"], 26)
+        self.assertEqual(len(first_page.data["results"]), 25)
+        self.assertIsNone(first_page.data["previous"])
+        self.assertIn("locale=", first_page.data["next"])
+        self.assertIn("page=2", first_page.data["next"])
+        self.assertTrue(
+            all(item["locale"] == self.owner_locale.pk for item in first_page.data["results"])
+        )
+
+        second_page = self.client.get(first_page.data["next"])
+
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.data["count"], 26)
+        self.assertEqual(len(second_page.data["results"]), 1)
+        self.assertIsNone(second_page.data["next"])
+        self.assertIn("page=1", second_page.data["previous"])
+        self.assertEqual(second_page.data["results"][0]["locale"], self.owner_locale.pk)
+
+    def test_listing_checklists_filters_before_paginating_by_locale(self):
+        second_locale = Locale.objects.create(
+            user=self.owner,
+            name="Forest",
+            geometry=LOCALE_SQUARE,
+        )
+        for index in range(26):
+            checklist = Checklist.objects.create(
+                user=self.owner,
+                name=f"Home checklist {index}",
+                start_date="2026-09-01",
+                end_date="2026-09-30",
+                locale=self.owner_locale,
+            )
+            ChecklistItem.objects.create(
+                checklist=checklist,
+                species=self.species,
+                sequence=1,
+            )
+        Checklist.objects.create(
+            user=self.owner,
+            name="Forest checklist",
+            locale=second_locale,
+        )
+
+        first_page = self.client.get(
+            f"/api/tempus/checklists/?locale={self.owner_locale.pk}&page=1&page_size=25"
+        )
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.data["count"], 26)
+        self.assertEqual(len(first_page.data["results"]), 25)
+        self.assertIsNone(first_page.data["previous"])
+        self.assertIn("page=2", first_page.data["next"])
+        self.assertTrue(
+            all(item["locale"] == self.owner_locale.pk for item in first_page.data["results"])
+        )
+        checklist = first_page.data["results"][0]
+        self.assertIn("name", checklist)
+        self.assertIn("start_date", checklist)
+        self.assertIn("end_date", checklist)
+        self.assertEqual(checklist["species_count"], 1)
+
+        second_page = self.client.get(first_page.data["next"])
+
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.data["count"], 26)
+        self.assertEqual(len(second_page.data["results"]), 1)
+        self.assertIsNone(second_page.data["next"])
+        self.assertIn("page=1", second_page.data["previous"])
 
     def test_checklist_cannot_reference_another_users_locale(self):
         response = self.client.post(

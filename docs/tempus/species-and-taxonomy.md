@@ -61,8 +61,11 @@ the species belongs.
 `SpeciesFollow` is user-owned and unique per user/species. It stores priority,
 notification preference, notes, and creation time. API species representations
 are annotated with whether the current user follows them. Besides normal
-`DELETE /api/tempus/species-follows/{id}/`, a follow can be removed by Dyntaxa
-taxon id with `DELETE /api/tempus/species-follows/unfollow/?species=<dyntaxa-id>`.
+`GET /api/tempus/species-follows/` (paginated CRUD) and
+`DELETE /api/tempus/species-follows/{id}/`, `GET /api/tempus/species-follows/my_follows/`
+returns the caller's follows as one unpaginated list, and a follow can be
+removed by Dyntaxa taxon id with
+`DELETE /api/tempus/species-follows/unfollow/?species=<dyntaxa-id>`.
 
 `POST /api/tempus/species/resolve/` takes `{ "ids": [<species-uuid>, ...] }`
 (at most 100, unique) and returns the matching cached species. It is a

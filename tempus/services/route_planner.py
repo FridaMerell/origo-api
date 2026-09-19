@@ -127,10 +127,12 @@ def _taxon_rows(agg: dict, significance_of=None, *,
                 today: datetime.date | None = None) -> list[diversity.TaxonRow]:
     """Rows from a ``TaxonAggregation`` response.
 
-    The live SOS shape is a flat ``{"taxonId", "observationCount", "firstSighting",
-    "lastSighting"}`` per record - no nested taxon block and no names (those are
-    filled later from a Dyntaxa batch / the recent-records search). Older/other
-    shapes with a nested ``taxon`` are still tolerated.
+    Confirmed live (2026-08-30 debugging pass, see route-planner live-
+    integration fixes): the SOS shape is a flat ``{"taxonId",
+    "observationCount", "firstSighting", "lastSighting"}`` per record - no
+    nested taxon block and no names (those are filled later from a Dyntaxa
+    batch / the recent-records search). Older/other shapes with a nested
+    ``taxon`` are still tolerated.
     """
     rows: list[diversity.TaxonRow] = []
     for rec in (agg or {}).get("records", []) or []:
@@ -365,7 +367,8 @@ def _default_significance_lookup(coords):
 
 def _name_of(value) -> str:
     """SOS ``location.county`` / ``.municipality`` are ``{featureId, name}``
-    dicts in the live API but plain strings in older payloads."""
+    dicts in the live API but plain strings in older payloads. Confirmed live
+    (2026-08-30 debugging pass, see route-planner live-integration fixes)."""
     if isinstance(value, dict):
         return value.get("name") or ""
     return value or ""

@@ -64,6 +64,10 @@ def _email_content(notification, template_key, context):
             else f"Säsongsstart om 7–14 dagar för {species_count} följda arter"
         )
         preheader = "En säsongsnotifikation från Tempus."
+    elif template_key == "apsis_weekly":
+        subject = "Här är veckans absid"
+        preheader = notification.message.splitlines()[0]
+        template_key = "generic"
     else:
         template_key = "generic"
         subject = f"Ny notifikation från {context['app_name']}"
@@ -86,6 +90,8 @@ def send_notification_email_now(notification_pk, template_key="generic", context
         return {"sent": False, "reason": "notification_not_found"}
     if not notification.user.email:
         return {"sent": False, "reason": "recipient_has_no_email"}
+    if notification.user.push_subscriptions.filter(is_active=True).exists():
+        return {"sent": False, "reason": "active_push_subscription"}
     subject, text, html = _email_content(notification, template_key, context)
     result = _send_resend_email(
         recipient=notification.user.email,

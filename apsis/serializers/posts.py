@@ -13,6 +13,7 @@ class PostSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "files",
+            "has_apsis",
             "author",
             "geolocation",
             "content",

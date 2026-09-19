@@ -87,6 +87,32 @@ def link_observation_to_checklists(observation: Observation) -> None:
         observation.checklist_items.add(*items)
 
 
+def backfill_observation_locales(*, user: AbstractBaseUser) -> int:
+    """Set ``locale`` on the user's observations that lack one but match one.
+
+    Returns the number of observations updated.
+    """
+    locales = list(Locale.objects.filter(user_id=user.pk))
+    if not locales:
+        return 0
+
+    observations = Observation.objects.filter(user=user, locale__isnull=True)
+    updated = []
+    for observation in observations:
+        for locale in locales:
+            try:
+                if point_in_multipolygon(observation.location, locale.geometry):
+                    observation.locale = locale
+                    updated.append(observation)
+                    break
+            except (IndexError, KeyError, TypeError, ValueError):
+                continue
+
+    if updated:
+        Observation.objects.bulk_update(updated, ["locale"])
+    return len(updated)
+
+
 def sync_observations_to_checklists(
     *, user: AbstractBaseUser, checklist: Checklist | None = None
 ) -> tuple[int, int]:
@@ -95,6 +121,8 @@ def sync_observations_to_checklists(
     Returns ``(observations_linked, checklist_item_links_created)``. Existing
     links are retained and do not count towards either total.
     """
+    backfill_observation_locales(user=user)
+
     items = ChecklistItem.objects.filter(
         checklist__user_id=user.pk,
         checklist__auto_add=True,

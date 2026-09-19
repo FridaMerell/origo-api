@@ -16,7 +16,15 @@ from .checklists import (
     ObservationFilter,
     ObservationViewSet,
 )
-from .reference import GeoAreaViewSet, PhenophaseViewSet, SourceViewSet, LocaleViewSet
+from .reference import (
+    AdministrativeBoundaryViewSet,
+    CountryOverviewView,
+    GeoAreaViewSet,
+    LandCoverViewSet,
+    LocaleViewSet,
+    PhenophaseViewSet,
+    SourceViewSet,
+)
 from .routes import RouteStopViewSet, RouteViewSet
 from .species import (
     PhenogramViewSet,
@@ -32,7 +40,10 @@ __all__ = [
     "BirdnetDeviceViewSet",
     "ChecklistItemViewSet",
     "ChecklistViewSet",
+    "AdministrativeBoundaryViewSet",
+    "CountryOverviewView",
     "GeoAreaViewSet",
+    "LandCoverViewSet",
     "LocaleViewSet"
     "ObservationFilter",
     "ObservationViewSet",

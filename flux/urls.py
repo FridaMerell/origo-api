@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from flux.views import (
+    CodexProjectDocumentUpdateView,
     CodexProjectPlanDetailView,
     CodexProjectPlanAppendView,
     CodexProjectPlanListView,
@@ -31,5 +32,10 @@ urlpatterns = [
     path('codex/projects/<int:project_id>/', CodexProjectPlanDetailView.as_view(), name='codex-project-detail'),
     path('codex/projects/<int:project_id>/plan/', CodexProjectPlanAppendView.as_view(), name='codex-project-plan-append'),
     path('codex/projects/<int:project_id>/tasks/', CodexProjectTaskCreateView.as_view(), name='codex-project-task-create'),
+    path(
+        'codex/projects/<int:project_id>/documents/<int:document_id>/',
+        CodexProjectDocumentUpdateView.as_view(),
+        name='codex-project-document-update',
+    ),
     path('', include(router.urls)),
 ]

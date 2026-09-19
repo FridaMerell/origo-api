@@ -1,6 +1,7 @@
 """Flux views, organised by domain to match ``flux.serializers``."""
 
 from .codex import (
+    CodexProjectDocumentUpdateView,
     CodexProjectPlanAppendView,
     CodexProjectPlanDetailView,
     CodexProjectPlanListView,
@@ -15,6 +16,7 @@ from .timeline import TimelineView
 from .updates import UpdateViewSet
 
 __all__ = [
+    "CodexProjectDocumentUpdateView",
     "CodexProjectPlanAppendView",
     "CodexProjectPlanDetailView",
     "CodexProjectPlanListView",

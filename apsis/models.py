@@ -3,6 +3,7 @@ from django.conf import settings
 
 class Post(models.Model):
     files = models.JSONField(blank=True, default=list)  # Store file metadata as a list of dictionaries
+    has_apsis = models.BooleanField(default=True)
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )

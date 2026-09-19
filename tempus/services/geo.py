@@ -218,3 +218,82 @@ def snap_towards(point, coords, max_offset_m: float | None = None) -> Coord:
 def as_geojson_point(coord: Coord) -> dict:
     lon, lat = coord
     return {"type": "Point", "coordinates": [lon, lat]}
+
+
+# --- SWEREF 99 TM (EPSG:3006) <-> WGS 84 ----------------------------------
+#
+# Some Swedish sources (Lantmäteriet's Ortnamn Direkt) only speak SWEREF 99
+# and reject WGS 84 (verified live: "Reference system not supported: 4326").
+# Pure-Python Krüger series for the transverse Mercator projection on GRS 80
+# (central meridian 15 °E, scale 0.9996, false easting 500 000 m), so no GIS
+# dependency is needed. Checked against real SWEREF/WGS 84 coordinate pairs
+# for the same points; sub-millimetre agreement.
+
+_GRS80_A = 6378137.0
+_GRS80_F = 1 / 298.257222101
+_E2 = _GRS80_F * (2 - _GRS80_F)
+_N = _GRS80_F / (2 - _GRS80_F)
+_TM_LON0 = math.radians(15.0)
+_TM_K0 = 0.9996
+_TM_FALSE_EASTING = 500_000.0
+_A_HAT = _GRS80_A / (1 + _N) * (1 + _N**2 / 4 + _N**4 / 64)
+
+_BETA = (
+    _N / 2 - 2 * _N**2 / 3 + 5 * _N**3 / 16 + 41 * _N**4 / 180,
+    13 * _N**2 / 48 - 3 * _N**3 / 5 + 557 * _N**4 / 1440,
+    61 * _N**3 / 240 - 103 * _N**4 / 140,
+    49561 * _N**4 / 161280,
+)
+_DELTA = (
+    _N / 2 - 2 * _N**2 / 3 + 37 * _N**3 / 96 - _N**4 / 360,
+    _N**2 / 48 + _N**3 / 15 - 437 * _N**4 / 1440,
+    17 * _N**3 / 480 - 37 * _N**4 / 840,
+    4397 * _N**4 / 161280,
+)
+
+
+def wgs84_to_sweref99tm(lon: float, lat: float) -> tuple[float, float]:
+    """``(lon, lat)`` in degrees -> SWEREF 99 TM ``(easting, northing)`` in metres."""
+    phi, dlon = math.radians(lat), math.radians(lon) - _TM_LON0
+    e2 = _E2
+    s = math.sin(phi)
+    conformal = phi - s * math.cos(phi) * (
+        e2 + (5 * e2**2 - e2**3) / 6 * s**2
+        + (104 * e2**3 - 45 * e2**4) / 120 * s**4
+        + 1237 * e2**4 / 1260 * s**6
+    )
+    xi = math.atan2(math.tan(conformal), math.cos(dlon))
+    eta = math.atanh(math.cos(conformal) * math.sin(dlon))
+    northing = xi + sum(
+        b * math.sin(2 * j * xi) * math.cosh(2 * j * eta) for j, b in enumerate(_BETA, 1)
+    )
+    easting = eta + sum(
+        b * math.cos(2 * j * xi) * math.sinh(2 * j * eta) for j, b in enumerate(_BETA, 1)
+    )
+    return (
+        _TM_K0 * _A_HAT * easting + _TM_FALSE_EASTING,
+        _TM_K0 * _A_HAT * northing,
+    )
+
+
+def sweref99tm_to_wgs84(easting: float, northing: float) -> Coord:
+    """SWEREF 99 TM ``(easting, northing)`` in metres -> ``(lon, lat)`` in degrees."""
+    xi = northing / (_TM_K0 * _A_HAT)
+    eta = (easting - _TM_FALSE_EASTING) / (_TM_K0 * _A_HAT)
+    xi_p = xi - sum(
+        d * math.sin(2 * j * xi) * math.cosh(2 * j * eta) for j, d in enumerate(_DELTA, 1)
+    )
+    eta_p = eta - sum(
+        d * math.cos(2 * j * xi) * math.sinh(2 * j * eta) for j, d in enumerate(_DELTA, 1)
+    )
+    conformal = math.asin(math.sin(xi_p) / math.cosh(eta_p))
+    dlon = math.atan2(math.sinh(eta_p), math.cos(xi_p))
+    e2 = _E2
+    s = math.sin(conformal)
+    phi = conformal + s * math.cos(conformal) * (
+        e2 + e2**2 + e2**3 + e2**4
+        - (7 * e2**2 + 17 * e2**3 + 30 * e2**4) / 6 * s**2
+        + (224 * e2**3 + 889 * e2**4) / 120 * s**4
+        - 4279 * e2**4 / 1260 * s**6
+    )
+    return math.degrees(_TM_LON0 + dlon), math.degrees(phi)

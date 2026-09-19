@@ -223,10 +223,22 @@ if redis_url:
         }
     }
 else:
+    # DatabaseCache, not LocMemCache: the marktäcke/land-cover map cache is
+    # meant to be genuinely persistent (30-day TTL, see
+    # LANTMATERIET_MARKTACKE's MAP_CACHE_SECONDS above) — LocMemCache lives
+    # only in a single worker process's RAM and is gone on every restart or
+    # deploy, and is not shared between worker processes either. No Redis
+    # here by choice; DatabaseCache uses the existing database instead of an
+    # extra service. Requires the cache table to exist
+    # (`manage.py createcachetable`, run once, outside this settings file).
     CACHES = {
         "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "origo-local",
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "django_cache",
+            "OPTIONS": {
+                "MAX_ENTRIES": 10000,
+                "CULL_FREQUENCY": 4,
+            },
         }
     }
 # Password validation
@@ -276,6 +288,10 @@ STORAGES = {
 # Keys are supplied only by the deployment environment, never committed here.
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "")
+
+APSIS_NEWSLETTER_TIME_ZONE = os.environ.get(
+    "APSIS_NEWSLETTER_TIME_ZONE", "Europe/Stockholm"
+)
 
 
 # Web Push (VAPID)
@@ -431,4 +447,192 @@ ARTDATABANKEN = {
     "SPECIESDATA_BIOTOPES_PATH": os.environ.get(
         "ARTDATABANKEN_SPECIESDATA_BIOTOPES_PATH", "biotopes"
     ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Lantmäteriet Marktäcke Direkt (OGC API Features)
+# ---------------------------------------------------------------------------
+# The API is selected instead of the STAC download service because Locales use
+# point lookups. Collections are discovered from the authenticated service;
+# COLLECTION_IDS is only an optional allow-list for selected subsets.
+LANTMATERIET_MARKTACKE = {
+    "BASE_URL": os.environ.get(
+        "LANTMATERIET_MARKTACKE_BASE_URL",
+        "https://api.lantmateriet.se/ogc-features/v1/marktacke",
+    ),
+    "COLLECTION_IDS": tuple(
+        value.strip()
+        for value in os.environ.get("LANTMATERIET_MARKTACKE_COLLECTION_IDS", "").split(",")
+        if value.strip()
+    ),
+    # Prefer a manually obtained API Portal access token when one is
+    # available. Private Geotorget customers instead use Basic authentication
+    # below - confirmed sufficient on its own by Lantmäteriet's documentation,
+    # not just a fallback (see _authorization_header in lantmateriet.py).
+    "ACCESS_TOKEN": os.environ.get("LANTMATERIET_MARKTACKE_ACCESS_TOKEN"),
+    "USERNAME": os.environ.get("LANTMATERIET_MARKTACKE_USERNAME"),
+    "PASSWORD": os.environ.get("LANTMATERIET_MARKTACKE_PASSWORD"),
+    "TIMEOUT": float(os.environ.get("LANTMATERIET_MARKTACKE_TIMEOUT", "15")),
+    "MAP_CACHE_SECONDS": int(
+        os.environ.get("LANTMATERIET_MARKTACKE_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+    ),
+    "MAP_PAGE_SIZE": int(os.environ.get("LANTMATERIET_MARKTACKE_MAP_PAGE_SIZE", "1000")),
+    "MAP_MAX_FEATURES": int(os.environ.get("LANTMATERIET_MARKTACKE_MAP_MAX_FEATURES", "10000")),
+}
+
+# Kommun, Län och Rike Direkt is an OGC API Features service. It uses the same
+# Geotorget credentials as Marktäcke.
+LANTMATERIET_ADMINISTRATIVE_BOUNDARIES = {
+    "BASE_URL": os.environ.get(
+        "LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_BASE_URL",
+        "https://api.lantmateriet.se/ogc-features/v1/administrativ-indelning",
+    ),
+    "COLLECTION_IDS": tuple(
+        value.strip()
+        for value in os.environ.get(
+            "LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_COLLECTION_IDS", ""
+        ).split(",")
+        if value.strip()
+    ),
+    "TIMEOUT": float(os.environ.get("LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_TIMEOUT", "15")),
+    "MAP_CACHE_SECONDS": int(
+        os.environ.get(
+            "LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 30)
+        )
+    ),
+    "MAP_PAGE_SIZE": int(
+        os.environ.get("LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_MAP_PAGE_SIZE", "1000")
+    ),
+    "MAP_MAX_FEATURES": int(
+        os.environ.get("LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_MAP_MAX_FEATURES", "10000")
+    ),
+}
+
+# Hydrografi is a separate Lantmäteriet OGC API Features product from
+# Marktäcke (lakes, watercourses, and the land-water boundary/coastline; sea
+# surface itself is not its own collection here - it already comes from
+# Marktäcke's "markytor" "Hav" objekttyp). Uses the same Geotorget credentials
+# as Marktäcke, like LANTMATERIET_ADMINISTRATIVE_BOUNDARIES above.
+LANTMATERIET_HYDROGRAFI = {
+    "BASE_URL": os.environ.get(
+        "LANTMATERIET_HYDROGRAFI_BASE_URL",
+        "https://api.lantmateriet.se/ogc-features/v1/hydrografi",
+    ),
+    "COLLECTION_IDS": tuple(
+        value.strip()
+        for value in os.environ.get("LANTMATERIET_HYDROGRAFI_COLLECTION_IDS", "").split(",")
+        if value.strip()
+    ),
+    "TIMEOUT": float(os.environ.get("LANTMATERIET_HYDROGRAFI_TIMEOUT", "15")),
+    "MAP_CACHE_SECONDS": int(
+        os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+    ),
+    "MAP_PAGE_SIZE": int(os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_PAGE_SIZE", "1000")),
+    "MAP_MAX_FEATURES": int(os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_MAX_FEATURES", "10000")),
+}
+
+# Ortnamn Direkt (place names) is a separate Lantmäteriet REST API, not OGC
+# API Features like the three products above - its base path is
+# "distribution/produkter/ortnamn/v2.2", not "ogc-features/v1/...". v2.2 is the
+# current version; the previous v2.1 is outgoing and answers 401 to accounts
+# authorized for the current one. It has no bbox/radius search; only
+# name/point/kommun/län criteria - see tempus/services/lantmateriet.py's
+# Ortnamn section for what that means for the Locale endpoints. Falls back to
+# the Marktäcke credentials above unless its own USERNAME/PASSWORD/
+# ACCESS_TOKEN are set - confirmed live that the shared Basic credentials are
+# accepted on v2.2.
+LANTMATERIET_ORTNAMN = {
+    "BASE_URL": os.environ.get(
+        "LANTMATERIET_ORTNAMN_BASE_URL",
+        "https://api.lantmateriet.se/distribution/produkter/ortnamn/v2.2",
+    ),
+    "ACCESS_TOKEN": os.environ.get(
+        "LANTMATERIET_ORTNAMN_ACCESS_TOKEN",
+        os.environ.get("LANTMATERIET_MARKTACKE_ACCESS_TOKEN"),
+    ),
+    "USERNAME": os.environ.get(
+        "LANTMATERIET_ORTNAMN_USERNAME", os.environ.get("LANTMATERIET_MARKTACKE_USERNAME")
+    ),
+    "PASSWORD": os.environ.get(
+        "LANTMATERIET_ORTNAMN_PASSWORD", os.environ.get("LANTMATERIET_MARKTACKE_PASSWORD")
+    ),
+    "TIMEOUT": float(os.environ.get("LANTMATERIET_ORTNAMN_TIMEOUT", "15")),
+    "CACHE_SECONDS": int(
+        os.environ.get("LANTMATERIET_ORTNAMN_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+    ),
+}
+
+# Byggnad Direkt (buildings) is a separate Lantmäteriet REST API, not OGC API
+# Features - base path "distribution/produkter/byggnad/v3". Confirmed
+# reachable at this BASE_URL (same "Missing Credentials" gateway error
+# unauthenticated as Ortnamn above). Unlike Ortnamn, it accepts an arbitrary
+# search geometry (POST /referens/geometri), but with a documented per-
+# request limit (1,000,000 m² area, 200,000 m perimeter) - larger areas are
+# tiled client-side, see tempus/services/lantmateriet.py. Falls back to the
+# Marktäcke credentials above (same Geotorget account) unless its own are
+# set - verify live whether this product needs its own API Portal
+# subscription before assuming the shared credentials work here too.
+LANTMATERIET_BYGGNAD = {
+    "BASE_URL": os.environ.get(
+        "LANTMATERIET_BYGGNAD_BASE_URL",
+        "https://api.lantmateriet.se/distribution/produkter/byggnad/v3",
+    ),
+    "ACCESS_TOKEN": os.environ.get(
+        "LANTMATERIET_BYGGNAD_ACCESS_TOKEN",
+        os.environ.get("LANTMATERIET_MARKTACKE_ACCESS_TOKEN"),
+    ),
+    "USERNAME": os.environ.get(
+        "LANTMATERIET_BYGGNAD_USERNAME", os.environ.get("LANTMATERIET_MARKTACKE_USERNAME")
+    ),
+    "PASSWORD": os.environ.get(
+        "LANTMATERIET_BYGGNAD_PASSWORD", os.environ.get("LANTMATERIET_MARKTACKE_PASSWORD")
+    ),
+    "TIMEOUT": float(os.environ.get("LANTMATERIET_BYGGNAD_TIMEOUT", "15")),
+    "CACHE_SECONDS": int(
+        os.environ.get("LANTMATERIET_BYGGNAD_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+    ),
+    "MAX_AREA_SQM": int(os.environ.get("LANTMATERIET_BYGGNAD_MAX_AREA_SQM", "1000000")),
+    "MAX_PERIMETER_M": int(os.environ.get("LANTMATERIET_BYGGNAD_MAX_PERIMETER_M", "200000")),
+    "MAX_TILES": int(os.environ.get("LANTMATERIET_BYGGNAD_MAX_TILES", "400")),
+}
+
+# Free, keyless OpenStreetMap vector tiles for the visual basemap. Tempus does
+# not proxy these tiles; it only exposes this public style URL to its frontend.
+TEMPUS_MAP_BASEMAP = {
+    "provider": "OpenFreeMap",
+    "style_url": os.environ.get(
+        "TEMPUS_MAP_BASEMAP_STYLE_URL", "https://tiles.openfreemap.org/styles/liberty"
+    ),
+    "attribution": "",
+    "initial_view": {"center": [15.0, 62.0], "zoom": 4.5},
+}
+
+
+# OpenStreetMap building footprints via the public Overpass API - replaces
+# Lantmäteriet's Byggnad Direkt (needs a legal review) for the Locale layers.
+# No key. Data is ODbL: credit "© OpenStreetMap contributors" where shown.
+# See tempus/services/openstreetmap.py.
+OVERPASS_API = {
+    "URL": os.environ.get("OVERPASS_URL", "https://overpass-api.de/api/interpreter"),
+    "USER_AGENT": os.environ.get("OVERPASS_USER_AGENT", "origo-tempus"),
+    "TIMEOUT": int(os.environ.get("OVERPASS_TIMEOUT", "120")),
+    "CACHE_SECONDS": int(os.environ.get("OVERPASS_CACHE_SECONDS", str(60 * 60 * 24 * 30))),
+    "MAX_FEATURES": int(os.environ.get("OVERPASS_MAX_FEATURES", "30000")),
+}
+
+# Trafikverket's open API (NVDB roads). One XML-over-POST endpoint; the API key
+# is sent inside the request body, so it has nothing to do with the Lantmäteriet
+# credentials above. See tempus/services/trafikverket.py.
+TRAFIKVERKET_API = {
+    "TOKEN": os.environ.get("TRAFIKVERKET_TOKEN"),
+    "URL": os.environ.get(
+        "TRAFIKVERKET_URL", "https://api.trafikinfo.trafikverket.se/v2/data.json"
+    ),
+    "TIMEOUT": float(os.environ.get("TRAFIKVERKET_TIMEOUT", "30")),
+    "CACHE_SECONDS": int(
+        os.environ.get("TRAFIKVERKET_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+    ),
+    "PAGE_SIZE": int(os.environ.get("TRAFIKVERKET_PAGE_SIZE", "1000")),
+    "MAX_FEATURES": int(os.environ.get("TRAFIKVERKET_MAX_FEATURES", "20000")),
 }

@@ -259,6 +259,75 @@ def append_plan_to_private_project(user, project_id, plan):
     return serialize_project(project)
 
 
+def update_document_in_private_project(user, project_id, document_id, payload):
+    """Partially update one document in place, in an existing private project.
+
+    Only the fields present in ``payload`` are changed, so a caller updating
+    just ``content`` doesn't have to resend ``title``. ``milestone_id``/
+    ``task_id``, when given, must belong to the same project, or ``null`` to
+    detach - same validation as ``add_task_to_private_project``.
+    """
+    if not isinstance(payload, dict):
+        raise CodexPlanError('document must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        document = Document.objects.get(pk=document_id, project=project)
+    except Document.DoesNotExist as exc:
+        raise CodexPlanError('Document not found in this project.') from exc
+
+    update_fields = []
+    if 'title' in payload:
+        document.title = _text(payload.get('title'), 'document.title', required=True)
+        update_fields.append('title')
+    if 'kind' in payload:
+        document.kind = _choice(payload, 'kind', Document.Kind.values, document.kind)
+        update_fields.append('kind')
+    if 'content' in payload:
+        document.content = _text(payload.get('content'), 'document.content', maximum=100000)
+        update_fields.append('content')
+    if 'milestone_id' in payload:
+        milestone_id = _optional_id(payload.get('milestone_id'), 'milestone_id')
+        milestone = None
+        if milestone_id is not None:
+            try:
+                milestone = Milestone.objects.get(pk=milestone_id, project=project)
+            except Milestone.DoesNotExist as exc:
+                raise CodexPlanError('milestone_id must belong to this project.') from exc
+        document.milestone = milestone
+        update_fields.append('milestone')
+    if 'task_id' in payload:
+        task_id = _optional_id(payload.get('task_id'), 'task_id')
+        task = None
+        if task_id is not None:
+            try:
+                task = Task.objects.get(pk=task_id, project=project)
+            except Task.DoesNotExist as exc:
+                raise CodexPlanError('task_id must belong to this project.') from exc
+        document.task = task
+        update_fields.append('task')
+
+    if not update_fields:
+        raise CodexPlanError(
+            'At least one of title, kind, content, milestone_id, task_id must be given.'
+        )
+
+    update_fields.append('updated_at')
+    document.save(update_fields=update_fields)
+    return {
+        'id': document.id,
+        'title': document.title,
+        'kind': document.kind,
+        'content': document.content,
+        'milestone_id': document.milestone_id,
+        'task_id': document.task_id,
+        'created_at': document.created_at.isoformat(),
+        'updated_at': document.updated_at.isoformat(),
+    }
+
+
 def add_task_to_private_project(user, project_id, task_data):
     """Create one task in an existing private project owned by the user."""
     if not isinstance(task_data, dict):

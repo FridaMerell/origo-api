@@ -95,6 +95,79 @@ class CodexProjectPlanTests(APITestCase):
         self.assertEqual(response.data['title'], 'Standalone task')
         self.assertTrue(Task.objects.filter(project_id=created['id'], title='Standalone task').exists())
 
+    def test_update_document_partially(self):
+        created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data
+        document = self.client.post(
+            f'/api/flux/codex/projects/{created["id"]}/plan/',
+            {'documents': [{'title': 'Original', 'content': 'v1'}]},
+            format='json',
+        ).data['documents'][0]
+
+        response = self.client.patch(
+            f'/api/flux/codex/projects/{created["id"]}/documents/{document["id"]}/',
+            {'content': 'v2'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['content'], 'v2')
+        self.assertEqual(response.data['title'], 'Original')
+
+        project = self.client.get(f'/api/flux/codex/projects/{created["id"]}/').data
+        self.assertEqual(len(project['documents']), 1)
+        self.assertEqual(project['documents'][0]['content'], 'v2')
+
+    def test_update_document_requires_at_least_one_field(self):
+        created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data
+        document = self.client.post(
+            f'/api/flux/codex/projects/{created["id"]}/plan/',
+            {'documents': [{'title': 'Doc'}]},
+            format='json',
+        ).data['documents'][0]
+
+        response = self.client.patch(
+            f'/api/flux/codex/projects/{created["id"]}/documents/{document["id"]}/',
+            {},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_document_rejects_a_milestone_from_another_project(self):
+        created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data
+        document = self.client.post(
+            f'/api/flux/codex/projects/{created["id"]}/plan/',
+            {'documents': [{'title': 'Doc'}]},
+            format='json',
+        ).data['documents'][0]
+        other = self.client.post('/api/flux/codex/projects/', {'name': 'Other plan'}, format='json').data
+        other_milestone = self.client.post(
+            f'/api/flux/codex/projects/{other["id"]}/plan/',
+            {'milestones': [{'ref': 'm1', 'title': 'Elsewhere'}]},
+            format='json',
+        ).data['milestones'][0]
+
+        response = self.client.patch(
+            f'/api/flux/codex/projects/{created["id"]}/documents/{document["id"]}/',
+            {'milestone_id': other_milestone['id']},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_cannot_update_a_document_in_someone_elses_project(self):
+        other = User.objects.create_user(username='colleague', password='x')
+        project = Project.objects.create(name='Not yours')
+        project.members.add(other)
+
+        response = self.client.patch(
+            f'/api/flux/codex/projects/{project.pk}/documents/1/',
+            {'content': 'nope'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     def test_add_task_rejects_a_milestone_from_another_project(self):
         created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data
         other = self.client.post('/api/flux/codex/projects/', {'name': 'Other plan'}, format='json').data

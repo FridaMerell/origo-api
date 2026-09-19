@@ -9,6 +9,11 @@ so rows are visible to the worker and rolled-back inserts enqueue nothing.
 A separate receiver emits a PostgreSQL ``NOTIFY`` on commit for every new
 ``BirdnetDetection`` so the BirdNET SSE stream (:class:`tempus.views.
 BirdnetDetectionStreamView`) can block on ``LISTEN`` instead of polling.
+
+A fourth receiver prefetches a Locale's padded Lantmäteriet land-cover,
+hydrography, and place-name area (see
+:func:`tempus.tasks.fetch_locale_land_cover`) on every save, since a
+geometry edit needs re-fetching just as much as a brand-new Locale does.
 """
 
 import json
@@ -19,7 +24,7 @@ from django.db import connection, transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from tempus.models import BIRDNET_DETECTION_CHANNEL, BirdnetDetection, GeoArea, Species
+from tempus.models import BIRDNET_DETECTION_CHANNEL, BirdnetDetection, GeoArea, Locale, Species
 from tempus import tasks
 
 
@@ -53,6 +58,13 @@ def fan_out_area_phenograms_on_create(sender, instance, created, **kwargs):
         transaction.on_commit(
             lambda: tasks.fan_out_area_phenograms.enqueue(str(instance.pk))
         )
+
+
+@receiver(post_save, sender=Locale, dispatch_uid="tempus_locale_land_cover_prefetch")
+def prefetch_locale_land_cover(sender, instance, created, **kwargs):
+    transaction.on_commit(
+        lambda: tasks.fetch_locale_land_cover.enqueue(str(instance.pk))
+    )
 
 
 @receiver(
