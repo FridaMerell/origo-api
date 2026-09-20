@@ -1,4 +1,4 @@
-"""TypeScript target: interfaces, API client and route table."""
+"""TypeScript target: type aliases, API client and route table."""
 
 import json
 
@@ -26,7 +26,7 @@ def types_file(spec):
     naming = spec["stack"]["api_naming"]
     blocks = []
     for entity in spec["entities"]:
-        lines = [f"export interface {pascal(entity['name'])} {{", "  id: number;"]
+        lines = [f"export type {pascal(entity['name'])} = {{", "  id: number;"]
         for field in entity["fields"]:
             ts_type = _TYPES[field["type"]]
             if field["nullable"] and ts_type != "unknown":

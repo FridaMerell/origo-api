@@ -402,21 +402,37 @@ def _append_plan_to_project(project, user, plan):
             )
 
     relation_names = set()
+
+    def resolve_relation_entity(ref, field):
+        """Resolve a relation endpoint from this payload or an existing entity.
+
+        Plan fragments commonly add relations after the entities already exist.
+        Accepting an existing entity name makes those fragments appendable without
+        duplicating the entity definitions.
+        """
+        if ref in entities:
+            return entities[ref]
+        if not isinstance(ref, str) or not ref.strip():
+            raise CodexPlanError(f'{field} is required.')
+        try:
+            return project.entities.get(name=ref)
+        except Entity.DoesNotExist as exc:
+            raise CodexPlanError(f'Unknown {field}: {ref}.') from exc
+
     for item in relation_payloads:
         source_ref, target_ref = item.get('source_ref'), item.get('target_ref')
-        if source_ref not in entities:
-            raise CodexPlanError(f'Unknown source_ref: {source_ref}.')
-        if target_ref not in entities:
-            raise CodexPlanError(f'Unknown target_ref: {target_ref}.')
+        source = resolve_relation_entity(source_ref, 'source_ref')
+        target = resolve_relation_entity(target_ref, 'target_ref')
         relation_name = _text(item.get('name'), 'relation.name', required=True, maximum=100)
-        if (source_ref, relation_name) in relation_names:
-            raise CodexPlanError(f'Duplicate relation name on {source_ref}: {relation_name}.')
-        if entities[source_ref].fields.filter(name=relation_name).exists():
-            raise CodexPlanError(f'Relation name {relation_name} clashes with a field on {source_ref}.')
-        relation_names.add((source_ref, relation_name))
+        relation_key = (source.pk, relation_name)
+        if relation_key in relation_names or Relation.objects.filter(source=source, name=relation_name).exists():
+            raise CodexPlanError(f'Duplicate relation name on {source.name}: {relation_name}.')
+        if source.fields.filter(name=relation_name).exists():
+            raise CodexPlanError(f'Relation name {relation_name} clashes with a field on {source.name}.')
+        relation_names.add(relation_key)
         Relation.objects.create(
-            source=entities[source_ref],
-            target=entities[target_ref],
+            source=source,
+            target=target,
             kind=_choice(item, 'kind', Relation.Kind.values, Relation.Kind.FOREIGN_KEY),
             name=relation_name,
             related_name=_text(item.get('related_name'), 'relation.related_name', maximum=100),

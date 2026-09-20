@@ -17,6 +17,9 @@ class Project(models.Model):
         "VisualProfile", on_delete=models.SET_NULL, null=True, blank=True, related_name="projects"
     )
 
+    class Meta:
+        ordering=["name", "id"] 
+           
     def __str__(self):
         return self.name
 

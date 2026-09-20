@@ -126,9 +126,11 @@ class DjangoGeneratorTests(unittest.TestCase):
 
 
 class TypeScriptGeneratorTests(unittest.TestCase):
-    def test_interfaces_use_nullable_unions_and_relation_ids(self):
+    def test_types_use_nullable_unions_and_relation_ids(self):
         types = files_by_path(make_spec(), 'typescript')['types.ts']
 
+        self.assertIn('export type Author = {', types)
+        self.assertNotIn('export interface ', types)
         self.assertIn('born_at: string | null;', types)
         self.assertIn('author: number;', types)
         self.assertIn('editor: number | null;', types)

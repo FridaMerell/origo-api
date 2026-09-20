@@ -73,7 +73,7 @@ ones, so a project picks one instead of copying it.
   projects use it.
 
 ```ts
-interface Identity {
+type Identity = {
   id: number;
   owner: number;                     // read-only
   name: string;                      // unique per owner
@@ -105,7 +105,7 @@ interface Identity {
   updated_at: string;
 }
 
-interface IdentityColor {
+type IdentityColor = {
   name: string;                      // unique (case-insensitive) within the identity
   role: ColorRole | "";
   light: string;                     // "#rrggbb"; required unless theme_modes is "dark", else may be ""
@@ -114,7 +114,7 @@ interface IdentityColor {
 type ColorRole = "primary" | "secondary" | "accent" | "background" | "surface"
   | "text" | "muted" | "border" | "success" | "warning" | "danger";
 
-interface IdentityAsset {
+type IdentityAsset = {
   name: string;
   kind: "logo" | "logo_mark" | "icon" | "favicon" | "illustration" | "other";
   mode: "any" | "light" | "dark";    // background it is for; default "any"
