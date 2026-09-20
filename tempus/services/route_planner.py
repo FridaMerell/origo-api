@@ -315,6 +315,125 @@ def suggest_rest_stops(
     return kept
 
 
+def suggest_interesting_spots(
+    longitude: float,
+    latitude: float,
+    radius_m: int = 20_000,
+    *,
+    taxon_id: int | None = None,
+    since_days: int = 30,
+    notable_days: int = 10,
+    num_spots: int = 10,
+    today: datetime.date | None = None,
+    significance_of=None,
+) -> list[dict]:
+    """Return ranked named observation sites around one WGS 84 position.
+
+    The position is used as the centre of one SOS search circle.  Sites are
+    scored by species variety, rarity and recency, then returned in the same
+    shape as route suggestions (without route-specific distance fields).
+    """
+    today = today or datetime.date.today()
+    point = (float(longitude), float(latitude))
+    coords = [point, point]
+    if significance_of is None:
+        significance_of = _default_significance_lookup(coords)
+
+    date = _date_filter(since_days, today=today)
+    flt = {**_base_filter(taxon_id, date),
+           "geographics": _point_geographics(longitude, latitude, radius_m)}
+    agg = _taxon_aggregation(flt, take=1000)
+    rows = _taxon_rows(agg, significance_of, today=today)
+    if not rows:
+        return []
+
+    enrich = _enrich_taxa({row.taxon_id for row in rows})
+    search_filter = {**_base_filter(taxon_id, date),
+                     "geographics": _point_geographics(longitude, latitude, radius_m),
+                     "output": {"fields": _SEARCH_FIELDS}}
+    page = _search_observations(search_filter, take=_SEARCH_TAKE,
+                                sort_by="event.startDate", sort_order="Desc")
+    records = (page or {}).get("records", []) or []
+
+    groups: dict[str, dict] = {}
+    for record in records:
+        location = record.get("location") or {}
+        name = (location.get("locality") or "").strip()
+        key = location.get("locationId") or name
+        if not key or not name:
+            continue
+        group = groups.setdefault(key, {
+            "name": name,
+            "location_id": location.get("locationId") or "",
+            "county": _name_of(location.get("county")),
+            "municipality": _name_of(location.get("municipality")),
+            "records": [],
+            "coordinates": [],
+        })
+        group["records"].append(record)
+        rec_lat = location.get("decimalLatitude")
+        rec_lon = location.get("decimalLongitude")
+        if rec_lat is not None and rec_lon is not None:
+            group["coordinates"].append((float(rec_lon), float(rec_lat)))
+
+    spots = []
+    for group in groups.values():
+        site_rows = _site_rows(group["records"], enrich, today)
+        if len([row for row in site_rows if row.count > 0]) < _MIN_SITE_TAXA:
+            continue
+        result = diversity.score(site_rows)
+        site_point = group["coordinates"] or [point]
+        site_lon = sum(coord[0] for coord in site_point) / len(site_point)
+        site_lat = sum(coord[1] for coord in site_point) / len(site_point)
+        highlights = [{
+            "taxon_id": contribution.taxon_id,
+            "scientific_name": contribution.scientific_name,
+            "vernacular_name": contribution.vernacular_name,
+            "count": contribution.count,
+            "last_seen_days": contribution.last_seen_days,
+            "red_list_category": contribution.red_list_category,
+            "reason": contribution.reason,
+        } for contribution in result.contributions[:8]]
+        notable_recent = sorted(({
+            "taxon_id": row.taxon_id,
+            "scientific_name": row.scientific_name,
+            "vernacular_name": row.vernacular_name,
+            "last_seen_days": row.last_seen_days,
+            "red_list_category": row.red_list_category,
+        } for row in site_rows
+            if row.effective_significance >= diversity.NOTABLE_SIGNIFICANCE
+            and row.last_seen_days is not None
+            and row.last_seen_days <= notable_days),
+            key=lambda item: item["last_seen_days"])
+        top_species = sorted(({
+            "scientific_name": row.scientific_name,
+            "vernacular_name": row.vernacular_name,
+            "count": row.count,
+        } for row in site_rows if row.count > 0),
+            key=lambda item: item["count"], reverse=True)[:15]
+        spots.append({
+            "score": result.score,
+            "breakdown": result.breakdown,
+            "location": geo.as_geojson_point((site_lon, site_lat)),
+            "locality": _clean_site_name(group["name"]),
+            "location_id": group["location_id"],
+            "municipality": group["municipality"],
+            "county": group["county"],
+            "distance_m": round(
+                geo.haversine_m(latitude, longitude, site_lat, site_lon), 1
+            ),
+            "species_count": result.richness,
+            "highlights": highlights,
+            "notable_recent": notable_recent[:10],
+            "top_species": top_species,
+        })
+
+    spots.sort(key=lambda spot: spot["score"], reverse=True)
+    for rank, spot in enumerate(spots[:num_spots], start=1):
+        spot["rank"] = rank
+    return spots[:num_spots]
+
+
 def _default_significance_lookup(coords):
     """A ``taxon_id -> float | None`` lookup backed by the database.
 

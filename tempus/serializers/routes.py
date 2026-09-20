@@ -65,6 +65,18 @@ class SuggestedStopsQuerySerializer(serializers.Serializer):
     min_gap_m = serializers.FloatField(min_value=0, required=False)
 
 
+class InterestingSpotsQuerySerializer(serializers.Serializer):
+    """Query params for a point-based interesting-spots search."""
+
+    longitude = serializers.FloatField(min_value=-180, max_value=180)
+    latitude = serializers.FloatField(min_value=-90, max_value=90)
+    radius_m = serializers.IntegerField(min_value=1, max_value=100_000, default=20_000)
+    taxon_id = serializers.IntegerField(min_value=1, required=False)
+    since_days = serializers.IntegerField(min_value=1, max_value=365, default=30)
+    notable_days = serializers.IntegerField(min_value=1, max_value=365, default=10)
+    num_spots = serializers.IntegerField(min_value=1, max_value=25, default=10)
+
+
 class RouteSuggestionRunSerializer(serializers.ModelSerializer):
     """Read-only view of a route's current rest-stop suggestion computation."""
 

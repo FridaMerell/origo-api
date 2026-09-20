@@ -1,5 +1,8 @@
 # Tempus documentation
 
+The position-based interesting spots endpoint is documented in
+[`routes.md`](routes.md).
+
 Tempus handles species taxonomy, seasonality, observations, checklists, nature
 routes, and short-lived BirdNET detections.
 
@@ -38,3 +41,22 @@ routes, and short-lived BirdNET detections.
 Most Tempus resources are exposed beneath `/api/tempus/` through Django REST
 Framework. Authentication and object scoping vary by resource and are described
 on each feature page.
+
+## Position-based interesting spots
+
+`GET /api/tempus/interesting-spots/` returns ranked, named observation sites
+around one WGS 84 position. It uses a 20 km radius by default, so a minimal
+request is:
+
+```text
+GET /api/tempus/interesting-spots/?longitude=18.0649&latitude=59.3293
+```
+
+Optional query parameters are `radius_m` (1–100,000, default 20,000),
+`taxon_id`, `since_days` (1–365, default 30), `notable_days` (1–365, default
+10), and `num_spots` (1–25, default 10).
+
+The response includes the searched point, radius, result count, and a `spots`
+array ordered by score. Each spot includes its GeoJSON location, distance from
+the searched point, locality, municipality/county, species count, score
+breakdown, recent notable species, explanatory highlights, and top species.

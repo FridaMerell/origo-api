@@ -755,6 +755,7 @@ def scaffold_private_project(user, project_id, target):
 def import_project_plan_for_user(user, plan):
     if not isinstance(plan, dict):
         raise CodexPlanError('plan must be an object.')
+    updated_count = 0
     with transaction.atomic():
         project = Project.objects.create(
             name=_text(plan.get('name'), 'name', required=True),
@@ -810,7 +811,8 @@ def upsert_relations_to_private_project(user, project_id, payload):
             source = entities.get(source_name)
             if source is None:
                 raise CodexPlanError(f'Unknown source_ref: {source_name}.')
-            Relation.objects.filter(source=source, name=relation_name).delete()
+            deleted, _ = Relation.objects.filter(source=source, name=relation_name).delete()
+            updated_count += deleted
 
         for item in relation_payloads:
             source_name = _text(item.get('source_ref'), 'relation.source_ref', required=True)
@@ -832,7 +834,8 @@ def upsert_relations_to_private_project(user, project_id, payload):
             relation.nullable = _bool(item, 'nullable')
             relation.description = _text(item.get('description'), 'relation.description', maximum=10000)
             relation.save()
-    return serialize_project(project)
+            updated_count += 1
+    return {'id': project.id, 'relations_updated': updated_count}
 
 
 def update_document_in_private_project(user, project_id, document_id, payload):

@@ -1,0 +1,1 @@
+{"remove_relations":[{"source_ref":"Post","name":"author"}],"relations":[{"source_ref":"Post","target_ref":"User","kind":"fk","name":"author","related_name":"posts","on_delete":"cascade"}]}

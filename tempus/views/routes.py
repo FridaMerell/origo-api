@@ -8,7 +8,7 @@ import re
 from django.http.request import HttpRequest
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
@@ -17,6 +17,7 @@ from tempus.serializers import (
     RouteSerializer,
     RouteStopSerializer,
     RouteSuggestionRunSerializer,
+    InterestingSpotsQuerySerializer,
     SuggestedStopsQuerySerializer,
 )
 from tempus.models import Phenogram, Route, RouteStop, RouteSuggestionRun, Species
@@ -143,6 +144,30 @@ class RouteStopViewSet(viewsets.ModelViewSet):
         return RouteStop.objects.filter(route__user=self.request.user).select_related(
             "route"
         )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def interesting_spots(request):
+    """Return notable named observation sites around a map position."""
+    params = InterestingSpotsQuerySerializer(data=request.query_params)
+    params.is_valid(raise_exception=True)
+    values = params.validated_data
+    try:
+        spots = route_planner.suggest_interesting_spots(**values)
+    except artdatabanken.ArtdatabankenConfigurationError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    except artdatabanken.ArtdatabankenAPIError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+    return Response({
+        "point": {
+            "type": "Point",
+            "coordinates": [values["longitude"], values["latitude"]],
+        },
+        "radius_m": values["radius_m"],
+        "count": len(spots),
+        "spots": spots,
+    })
 
 
 def exploration_view(request: HttpRequest):

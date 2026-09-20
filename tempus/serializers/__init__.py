@@ -17,6 +17,7 @@ from .routes import (
     RouteSerializer,
     RouteStopSerializer,
     RouteSuggestionRunSerializer,
+    InterestingSpotsQuerySerializer,
     SuggestedStopsQuerySerializer,
 )
 from .species import (
@@ -55,6 +56,7 @@ __all__ = [
     "RouteSerializer",
     "RouteStopSerializer",
     "RouteSuggestionRunSerializer",
+    "InterestingSpotsQuerySerializer",
     "SeasonalOverviewQuerySerializer",
     "SeasonalOverviewSerializer",
     "SourceSerializer",

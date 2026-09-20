@@ -17,7 +17,7 @@ from tempus.views.reference import (
     PhenophaseViewSet,
     SourceViewSet,
 )
-from tempus.views.routes import RouteStopViewSet, RouteViewSet
+from tempus.views.routes import RouteStopViewSet, RouteViewSet, interesting_spots
 from tempus.views.species import (
     PhenogramViewSet,
     SpeciesCategoryViewSet,
@@ -52,5 +52,6 @@ router.register("locales", LocaleViewSet, basename='locale')
 
 urlpatterns = [
     path('country-overview/', CountryOverviewView.as_view(), name='country-overview'),
+    path('interesting-spots/', interesting_spots, name='interesting-spots'),
     path('', include(router.urls)),
 ]
