@@ -5,6 +5,56 @@ from flux.models import Integration, Relation, Resource, Role, Screen, SeedRow, 
 from .common import snake
 
 
+def _integration_spec(item):
+    env_vars = [name for name in (*item.env_vars, item.auth_env_var, item.auth_secret_env_var) if name]
+    return {
+        "name": item.name,
+        "kind": item.kind,
+        "description": item.description,
+        "env_vars": list(dict.fromkeys(env_vars)),
+        "base_url": item.base_url,
+        "auth_type": item.auth_type,
+        "auth_name": item.auth_name,
+        "auth_env_var": item.auth_env_var,
+        "auth_secret_env_var": item.auth_secret_env_var,
+        "oauth_token_url": item.oauth_token_url,
+        "timeout_seconds": item.timeout_seconds,
+        "retries": item.retries,
+        "rate_limit_per_minute": item.rate_limit_per_minute,
+        "cache_ttl_seconds": item.cache_ttl_seconds,
+        "operations": [
+            {
+                "name": op.name,
+                "description": op.description,
+                "method": op.method,
+                "path": op.path,
+                "body_format": op.body_format,
+                "params": list(op.params),
+                "items_path": op.items_path,
+                "pagination": op.pagination,
+                "pagination_config": dict(op.pagination_config),
+                "filters": list(op.filters),
+                "entity": op.entity.name if op.entity_id else None,
+                "key_field": op.key_field,
+                "mappings": list(op.mappings),
+                "sync": op.sync,
+                "sync_interval_minutes": op.sync_interval_minutes,
+                "cache_ttl_seconds": op.cache_ttl_seconds,
+                "sample_response": op.sample_response,
+            }
+            for op in sorted(item.operations.all(), key=lambda operation: operation.name)
+        ],
+    }
+
+
+def entity_mapping_info(entity):
+    """Field and relation info of an entity in the shape ``clean_operation`` expects."""
+    return {
+        "fields": {field.name: {"type": field.type, "nullable": field.nullable} for field in entity.fields.all()},
+        "relations": {relation.name: relation.kind for relation in entity.outgoing_relations.all()},
+    }
+
+
 def unknown_seed_keys(entity, data):
     """Keys in a seed row that are neither a field, a relation nor ``id`` of the entity."""
     allowed = {"id"}
@@ -143,8 +193,8 @@ def build_spec(project):
             for screen in screens
         ],
         "integrations": [
-            {"name": item.name, "kind": item.kind, "env_vars": list(item.env_vars)}
-            for item in Integration.objects.filter(project=project)
+            _integration_spec(item)
+            for item in Integration.objects.filter(project=project).prefetch_related("operations__entity")
         ],
         "seeds": [
             {"entity": entity.name, "rows": seeds[entity.pk]} for entity in entities if entity.pk in seeds

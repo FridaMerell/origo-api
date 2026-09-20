@@ -242,7 +242,7 @@ backend writes nothing to disk.
 ## Scaffold and planning actions
 
 ```http
-GET  /projects/{id}/scaffold/?target=django|typescript|csharp|skeleton|design
+GET  /projects/{id}/scaffold/?target=django|typescript|csharp|skeleton|design|integration
 POST /projects/{id}/scaffold-document/    {"target": "django"}
 POST /projects/{id}/generate-tasks/
 ```
@@ -260,7 +260,11 @@ POST /projects/{id}/generate-tasks/
   an empty list. Refetch milestones and tasks afterwards.
 - Targets: `django`, `typescript` and `csharp` are only useful once the project
   has entities (with none they return near-empty files); `skeleton` is always
-  available; `design` needs an identity.
+  available; `design` needs an identity; `integration` needs at least one
+  integration that has operations (and a `base_url`), otherwise `400`. Offer
+  `integration` only when the project has such integrations.
+- `generate-tasks` also adds an `Integration: <name>.<operation>` task ("verify
+  against the live API") per integration operation.
 
 ## Design resources
 
@@ -277,7 +281,8 @@ Filters are the only query parameters.
 | `/roles/` | `project` | `project`, `name`, `description` |
 | `/role-permissions/` | `role`, `resource`, `role__project` | `role`, `resource`, `operation`, `scope` |
 | `/screens/` | `project`, `parent` | `project`, `name`, `route`, `description`, `entities` (ids), `parent` |
-| `/integrations/` | `project`, `kind` | `project`, `name`, `kind`, `description`, `env_vars` (string[]) |
+| `/integrations/` | `project`, `kind` | `project`, `name`, `kind`, `description`, `env_vars` (string[]), plus the inbound-API settings below |
+| `/integration-operations/` | `integration`, `integration__project`, `entity` | `integration`, `name`, `description`, `method`, `path`, `body_format`, `params`, `items_path`, `pagination`, `pagination_config`, `filters`, `entity`, `key_field`, `mappings`, `sync`, `sync_interval_minutes`, `cache_ttl_seconds`, `sample_response` |
 | `/seed-rows/` | `entity`, `entity__project` | `entity`, `data` (object), `order` |
 
 Enums:
@@ -310,6 +315,139 @@ Rules that surface as `400`:
 - Defaults are strings on the wire (e.g. `"100"`, `"false"`, `"now"`,
   `"uuid4"`). Unsupported combinations are reported by `scaffold`, not on save.
 
+## Inbound API integrations
+
+An integration with a `base_url` and operations describes an external data API
+the app reads from. The backend validates each operation against a **real
+sample response** the user captured from the live API, so the editor is built
+around that sample. Show this UI only for integrations of kind `api`.
+
+```ts
+type AuthType = "none" | "api_key_header" | "api_key_query" | "bearer" | "basic" | "oauth_client";
+
+interface Integration {                 // existing fields plus the inbound-API settings
+  id: number; project: number; name: string;
+  kind: "api" | "auth" | "storage" | "email" | "payment" | "other";
+  description: string;
+  env_vars: string[];
+  base_url: string;                     // https:// only, or ""
+  auth_type: AuthType;
+  auth_name: string;                    // header / query parameter name (api_key_*)
+  auth_env_var: string;                 // NAME of an env var, e.g. TRAFIKVERKET_API_KEY
+  auth_secret_env_var: string;          // password / client secret env var name
+  oauth_token_url: string;
+  timeout_seconds: number;              // 1..120, default 30
+  retries: number;                      // 0..5, default 2
+  rate_limit_per_minute: number | null;
+  cache_ttl_seconds: number;            // 0 disables caching, default 3600
+}
+
+interface IntegrationOperation {
+  id: number; integration: number;
+  name: string;                         // lowercase python identifier, unique per integration
+  description: string;
+  method: "GET" | "POST";
+  path: string;                         // starts with "/", {param} for path parameters
+  body_format: "json" | "form";
+  params: OperationParam[];
+  items_path: string;                   // dotted path to the list of records, "" = the response itself
+  pagination: "none" | "offset" | "page" | "cursor";
+  pagination_config: Record<string, string | number>;
+  filters: OperationFilter[];
+  entity: number | null;                // entity the records map onto
+  key_field: string;                    // mapped plain field that identifies a record
+  mappings: { path: string; field: string }[];
+  sync: boolean;
+  sync_interval_minutes: number | null; // needs sync
+  cache_ttl_seconds: number | null;     // overrides the integration default
+  sample_response: unknown | null;      // any JSON, max 200 kB
+}
+
+interface OperationParam {
+  name: string;                         // wire name, e.g. "regionCode"
+  in: "query" | "path" | "body" | "header";
+  type: "string" | "int" | "float" | "bool";
+  required: boolean;                    // path params are always required
+  default: string | number | boolean | null;
+  description: string;
+}
+
+interface OperationFilter {
+  path: string;
+  op: "eq" | "ne" | "in" | "not_null" | "is_null";
+  value?: string | number | boolean | null | (string | number | boolean)[]; // eq/ne: one value, in: list
+}
+```
+
+**Secrets.** Never ask for or store an API key. Only the *names* of environment
+variables are stored (`^[A-Z][A-Z0-9_]*$`); tell the user the value belongs in the
+server's environment. Show only the auth inputs the chosen `auth_type` needs:
+`api_key_header`/`api_key_query` need `auth_name` + `auth_env_var`; `bearer`
+needs `auth_env_var`; `basic` needs `auth_env_var` (user) + `auth_secret_env_var`
+(password); `oauth_client` needs both env vars + `oauth_token_url` (https).
+Missing settings answer `400` on `auth_type`.
+
+**Editor flow** (an operation is saved as one request; the server validates all of
+it together):
+
+1. **Request:** method, path, and a params table (name, where it goes, type,
+   required, default). Path placeholders must match the `path`-params exactly,
+   body params need `POST`, and a required param cannot have a default. The
+   python argument names are derived from the wire names (`pageSize` becomes
+   `page_size`; `use_cache` and Python keywords are not allowed).
+2. **Paging:** pick `pagination`, then show its fields: `offset` needs
+   `limit_param`, `offset_param`, `page_size`; `page` needs `page_param`,
+   `page_size`, `first_page` (0 or 1) and optionally `size_param`; `cursor` needs
+   `cursor_param`, `next_cursor_path` and optionally `size_param` + `page_size`.
+   All accept `max_pages` (default 100): a run that exceeds it fails rather than
+   crawling on. Paging parameter names must not also be declared as params.
+3. **Sample:** a JSON box for a real response, with a hint: "call the API with
+   your key (for example with curl), then paste the response". Parse it in the
+   browser first and show its size (limit 200 kB; paste a representative
+   excerpt of a long list). Then let the user pick `items_path` from a tree of
+   the sample; a paginated operation needs a list at that path.
+4. **Filters:** pick a path from the sample, an operator and a value.
+5. **Mapping:** choose the target `entity`, then map each entity field or fk/o2o
+   relation from a path in one record. Offer the paths of the first record, show
+   the sample value next to each, and flag type mismatches live. Choose the
+   `key_field` (a mapped plain field, not a relation). A many-to-many relation
+   cannot be mapped; a relation stores the *key value* of the related record.
+6. **Sync:** the `sync` toggle (needs entity, mappings and a key field) and an
+   optional `sync_interval_minutes`.
+
+Path syntax: keys joined by dots, list positions as numbers (`data.items`,
+`items.0.name`); keys use letters, digits, `_` and `-`. Mapping and filter paths
+must exist in at least one of the first 20 records of the sample.
+
+Type rules the server enforces for mappings (mirror them for live feedback):
+
+| Field type | Sample value must be |
+|---|---|
+| `string`, `text`, `email`, `url`, `date`, `datetime`, `time`, `uuid` | string |
+| `int`, `bigint` | integer (not a boolean) |
+| `decimal`, `float` | number |
+| `bool` | boolean |
+| `json` | anything |
+| any field | `null` only if the field is nullable |
+| fk / o2o relation | integer or string (a key value), or `null` |
+
+**Errors.** Field-level problems come back per field (`base_url`, `name`,
+`timeout_seconds`, ...). Everything that depends on several fields, such as a
+mapping that does not fit the sample, comes back as
+`{"non_field_errors": ["mapping path 'x' does not exist in the sample response."]}`
+on the operation; show it at the top of the editor. Auth problems come back on
+`auth_type`. Deleting the entity an operation maps onto leaves the operation
+with `entity: null`; for operations with `sync`, `scaffold` then answers `400`
+naming the broken mapping. Warn the user before deleting an entity that
+operations map onto (`?entity=<id>` on `integration-operations` finds them).
+
+**Result:** after saving, offer `scaffold?target=integration` (file tree with
+preview and download). Operations with `sync` produce a management command
+(`sync_<name>`) and, with an interval, a self-re-queuing background task; the
+generated `docs/integrations/<name>.md` explains both. Only JSON responses are
+supported; for XML, WKT geometry, OGC APIs or unusual paging the generated
+client is a starting point to adapt by hand.
+
 ## Suggested screens
 
 This maps to the frontend tasks already in Flux (project "Origo Flux",
@@ -324,7 +462,7 @@ milestone "Kickstarta nya projekt från datamodell", tasks 169-177):
 | 4 | Roles and permission matrix (resource × operation, scope) | `roles`, `role-permissions` |
 | 5 | "Generate tasks" with a result summary | `generate-tasks` |
 | 6 | Screen tree | `screens` |
-| 7 | Seed data, integrations, decision documents | `seed-rows`, `integrations`, documents with `kind: "decision"` |
+| 7 | Seed data, integrations (incl. inbound API operations), decision documents | `seed-rows`, `integrations`, `integration-operations`, documents with `kind: "decision"` |
 | Identity | Project switch, identity picker, identity library and editor, `design` target | project, `identities`, `scaffold` |
 
 Notes:

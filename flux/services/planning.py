@@ -2,7 +2,7 @@
 
 from django.db import transaction
 
-from flux.models import Milestone, Resource, Task
+from flux.models import IntegrationOperation, Milestone, Resource, Task
 
 
 def generate_tasks(project):
@@ -26,6 +26,19 @@ def generate_tasks(project):
                 if project.include_identity and project.identity_id
                 else []
             ),
+        ),
+        (
+            "Integrationer",
+            [
+                (
+                    f"Integration: {op.integration.name}.{op.name}",
+                    "Verifiera mot live-API:t, kontrollera mappningen och kör de genererade testerna."
+                    + (" Sätt upp schemalagd synk." if op.sync else ""),
+                )
+                for op in IntegrationOperation.objects.filter(integration__project=project)
+                .select_related("integration")
+                .order_by("integration__name", "name")
+            ],
         ),
         ("Tester", [(f"Tester: {e.name}", "Modell-, API- och behörighetstester.") for e in entities]),
     ]

@@ -2,6 +2,7 @@
 
 from .datamodel import EntitySerializer, FieldSerializer, RelationSerializer
 from .design import (
+    IntegrationOperationSerializer,
     IntegrationSerializer,
     ResourceSerializer,
     RolePermissionSerializer,
@@ -22,6 +23,7 @@ __all__ = [
     "DocumentSerializer",
     "EntitySerializer",
     "FieldSerializer",
+    "IntegrationOperationSerializer",
     "IntegrationSerializer",
     "MilestoneSerializer",
     "ProjectSerializer",

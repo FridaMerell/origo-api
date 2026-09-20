@@ -10,6 +10,7 @@ from flux.models import (
     Entity,
     Field,
     Integration,
+    IntegrationOperation,
     Milestone,
     Project,
     Relation,
@@ -25,7 +26,8 @@ from flux.models import (
 )
 from flux.services.scaffold import ScaffoldError, generate_files
 from flux.services.scaffold import identity as identity_rules
-from flux.services.scaffold.spec import build_spec, unknown_seed_keys
+from flux.services.scaffold import integration as integration_rules
+from flux.services.scaffold.spec import build_spec, entity_mapping_info, unknown_seed_keys
 
 
 class CodexPlanError(ValueError):
@@ -262,8 +264,47 @@ def serialize_project(project):
             for screen in project.screens.prefetch_related('entities').order_by('id')
         ],
         'integrations': [
-            {'id': item.id, 'name': item.name, 'kind': item.kind, 'description': item.description, 'env_vars': item.env_vars}
-            for item in project.integrations.order_by('id')
+            {
+                'id': item.id,
+                'name': item.name,
+                'kind': item.kind,
+                'description': item.description,
+                'env_vars': item.env_vars,
+                'base_url': item.base_url,
+                'auth_type': item.auth_type,
+                'auth_name': item.auth_name,
+                'auth_env_var': item.auth_env_var,
+                'auth_secret_env_var': item.auth_secret_env_var,
+                'oauth_token_url': item.oauth_token_url,
+                'timeout_seconds': item.timeout_seconds,
+                'retries': item.retries,
+                'rate_limit_per_minute': item.rate_limit_per_minute,
+                'cache_ttl_seconds': item.cache_ttl_seconds,
+                'operations': [
+                    {
+                        'id': op.id,
+                        'name': op.name,
+                        'description': op.description,
+                        'method': op.method,
+                        'path': op.path,
+                        'body_format': op.body_format,
+                        'params': op.params,
+                        'items_path': op.items_path,
+                        'pagination': op.pagination,
+                        'pagination_config': op.pagination_config,
+                        'filters': op.filters,
+                        'entity_id': op.entity_id,
+                        'key_field': op.key_field,
+                        'mappings': op.mappings,
+                        'sync': op.sync,
+                        'sync_interval_minutes': op.sync_interval_minutes,
+                        'cache_ttl_seconds': op.cache_ttl_seconds,
+                        'sample_response': op.sample_response,
+                    }
+                    for op in item.operations.all()
+                ],
+            }
+            for item in project.integrations.prefetch_related('operations').order_by('id')
         ],
         'seeds': [
             {'id': row.id, 'entity_id': row.entity_id, 'data': row.data, 'order': row.order}
@@ -448,6 +489,13 @@ _IDENTITY_TEXT_FIELDS = {
     'description': 10000, 'brand_name': 120, 'tagline': 255, 'tone': 10000,
     'logo_rules': 10000, 'icon_library': 60, 'icon_style': 60, 'guidelines': 100000,
 }
+
+
+def _int_in_range(item, key, low, high, default):
+    value = item.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise CodexPlanError(f'{key} must be an integer between {low} and {high}.')
+    return value
 
 
 def _number_in_range(item, key, low, high, default):
@@ -642,13 +690,45 @@ def _append_design_to_project(project, user, plan, entities):
         if integration_name in integration_names:
             raise CodexPlanError(f'Integration name already exists in this project: {integration_name}.')
         integration_names.add(integration_name)
-        Integration.objects.create(
+        try:
+            base_url = integration_rules.clean_base_url(item.get('base_url'))
+            auth = integration_rules.clean_auth(item)
+        except ValueError as exc:
+            raise CodexPlanError(f'{integration_name}: {exc}') from exc
+        rate = item.get('rate_limit_per_minute')
+        integration = Integration.objects.create(
             project=project,
             name=integration_name,
             kind=_choice(item, 'kind', Integration.Kind.values, Integration.Kind.API),
             description=_text(item.get('description'), 'integration.description', maximum=10000),
             env_vars=_string_list(item, 'env_vars'),
+            base_url=base_url,
+            timeout_seconds=_int_in_range(item, 'timeout_seconds', 1, 120, 30),
+            retries=_int_in_range(item, 'retries', 0, 5, 2),
+            rate_limit_per_minute=None if rate is None else _int_in_range(item, 'rate_limit_per_minute', 1, 100000, 1),
+            cache_ttl_seconds=_int_in_range(item, 'cache_ttl_seconds', 0, 31536000, 3600),
+            **auth,
         )
+        operation_names = set()
+        for operation in _items(item, 'operations'):
+            entity = None
+            if operation.get('entity_ref') is not None:
+                entity = entity_for(operation['entity_ref'], 'entity_ref')
+            try:
+                cleaned = integration_rules.clean_operation(
+                    operation, entity_mapping_info(entity) if entity is not None else None
+                )
+            except ValueError as exc:
+                raise CodexPlanError(f'{integration_name}.{operation.get("name")}: {exc}') from exc
+            if cleaned['name'] in operation_names:
+                raise CodexPlanError(f'Duplicate operation name on {integration_name}: {cleaned["name"]}.')
+            operation_names.add(cleaned['name'])
+            IntegrationOperation.objects.create(
+                integration=integration,
+                entity=entity,
+                description=_text(operation.get('description'), 'operation.description', maximum=10000),
+                **cleaned,
+            )
 
     for item in _items(plan, 'seeds'):
         entity = entity_for(item.get('entity_ref'), 'entity_ref')
@@ -708,6 +788,50 @@ def append_plan_to_private_project(user, project_id, plan):
         raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
     with transaction.atomic():
         _append_plan_to_project(project, user, plan)
+    return serialize_project(project)
+
+
+def upsert_relations_to_private_project(user, project_id, payload):
+    """Create or update relations on existing entities through the Codex API."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('payload must be an object.')
+    relation_payloads = _items(payload, 'relations')
+    remove_payloads = _items(payload, 'remove_relations')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+
+    with transaction.atomic():
+        entities = {entity.name: entity for entity in project.entities.all()}
+        for item in remove_payloads:
+            source_name = _text(item.get('source_ref'), 'remove_relations.source_ref', required=True)
+            relation_name = _text(item.get('name'), 'remove_relations.name', required=True)
+            source = entities.get(source_name)
+            if source is None:
+                raise CodexPlanError(f'Unknown source_ref: {source_name}.')
+            Relation.objects.filter(source=source, name=relation_name).delete()
+
+        for item in relation_payloads:
+            source_name = _text(item.get('source_ref'), 'relation.source_ref', required=True)
+            target_name = _text(item.get('target_ref'), 'relation.target_ref', required=True)
+            relation_name = _text(item.get('name'), 'relation.name', required=True)
+            source = entities.get(source_name)
+            target = entities.get(target_name)
+            if source is None:
+                raise CodexPlanError(f'Unknown source_ref: {source_name}.')
+            if target is None:
+                raise CodexPlanError(f'Unknown target_ref: {target_name}.')
+            if source.fields.filter(name=relation_name).exists():
+                raise CodexPlanError(f'Relation name {relation_name} clashes with a field on {source_name}.')
+            relation, _ = Relation.objects.get_or_create(source=source, name=relation_name)
+            relation.target = target
+            relation.kind = _choice(item, 'kind', Relation.Kind.values, Relation.Kind.FOREIGN_KEY)
+            relation.related_name = _text(item.get('related_name'), 'relation.related_name', maximum=100)
+            relation.on_delete = _choice(item, 'on_delete', Relation.OnDelete.values, Relation.OnDelete.CASCADE)
+            relation.nullable = _bool(item, 'nullable')
+            relation.description = _text(item.get('description'), 'relation.description', maximum=10000)
+            relation.save()
     return serialize_project(project)
 
 

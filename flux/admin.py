@@ -4,6 +4,7 @@ from flux.models import (
     Entity,
     Field,
     Integration,
+    IntegrationOperation,
     Milestone,
     Project,
     Relation,
@@ -109,8 +110,14 @@ class ScreenAdmin(admin.ModelAdmin):
 
 @admin.register(Integration, site=site)
 class IntegrationAdmin(admin.ModelAdmin):
-    list_display = ['name', 'kind', 'project']
-    list_filter = ['project', 'kind']
+    list_display = ['name', 'kind', 'project', 'base_url', 'auth_type']
+    list_filter = ['project', 'kind', 'auth_type']
+
+
+@admin.register(IntegrationOperation, site=site)
+class IntegrationOperationAdmin(admin.ModelAdmin):
+    list_display = ['name', 'integration', 'method', 'path', 'entity', 'sync']
+    list_filter = ['integration__project', 'method', 'sync']
 
 
 @admin.register(SeedRow, site=site)

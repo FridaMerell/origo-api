@@ -63,7 +63,23 @@ def requirements(spec):
         packages.append("djangorestframework-simplejwt")
     if stack["api_naming"] == "camel_case":
         packages.append("djangorestframework-camel-case")
+    if _has_operations(spec):
+        packages.append("requests")
+    if _has_scheduled_sync(spec):
+        packages += ["django-tasks", "django-tasks-db"]
     return "\n".join(packages) + "\n"
+
+
+def _operations(spec):
+    return [op for integration in spec["integrations"] for op in integration.get("operations", [])]
+
+
+def _has_operations(spec):
+    return bool(_operations(spec))
+
+
+def _has_scheduled_sync(spec):
+    return any(op.get("sync") and op.get("sync_interval_minutes") for op in _operations(spec))
 
 
 def dockerfile(spec):
@@ -177,6 +193,8 @@ def django_project_files(spec):
     ]
     if stack["auth_method"] == "token":
         apps.append('    "rest_framework.authtoken",')
+    if _has_scheduled_sync(spec):
+        apps += ['    "django_tasks",', '    "django_tasks_db",']
     apps.append(f'    "{label}",')
     authentication = {
         "session": "rest_framework.authentication.SessionAuthentication",
@@ -245,6 +263,17 @@ def django_project_files(spec):
             "",
             *rest,
             "",
+            *(
+                [
+                    "# Scheduled integration syncs; run a worker with `python manage.py db_worker`.",
+                    "TASKS = {",
+                    '    "default": {"BACKEND": os.environ.get("TASKS_BACKEND", "django_tasks_db.DatabaseBackend")},',
+                    "}",
+                    "",
+                ]
+                if _has_scheduled_sync(spec)
+                else []
+            ),
             'STATIC_URL = "static/"',
             'DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"',
             "USE_TZ = True",

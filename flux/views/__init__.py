@@ -4,6 +4,7 @@ from .codex import (
     CodexIdentityListView,
     CodexProjectDocumentUpdateView,
     CodexProjectPlanAppendView,
+    CodexProjectRelationsView,
     CodexProjectPlanDetailView,
     CodexProjectPlanListView,
     CodexProjectMilestoneStatusView,
@@ -13,6 +14,7 @@ from .codex import (
 )
 from .datamodel import EntityViewSet, FieldViewSet, RelationViewSet
 from .design import (
+    IntegrationOperationViewSet,
     IntegrationViewSet,
     ResourceViewSet,
     RolePermissionViewSet,
@@ -34,6 +36,7 @@ __all__ = [
     "CodexIdentityListView",
     "CodexProjectDocumentUpdateView",
     "CodexProjectPlanAppendView",
+    "CodexProjectRelationsView",
     "CodexProjectPlanDetailView",
     "CodexProjectPlanListView",
     "CodexProjectMilestoneStatusView",
@@ -43,6 +46,7 @@ __all__ = [
     "DocumentViewSet",
     "EntityViewSet",
     "FieldViewSet",
+    "IntegrationOperationViewSet",
     "IntegrationViewSet",
     "MilestoneViewSet",
     "ProjectViewSet",

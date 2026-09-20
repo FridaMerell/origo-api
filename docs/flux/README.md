@@ -16,7 +16,8 @@ link — see [Inbjudningar](../accounts/invitations.md).
 - `updates` — project, milestone, and task updates
 - `entities`, `fields`, `relations` — the structured data model of a project
 - `stack-profiles`, `resources`, `roles`, `role-permissions`, `screens`,
-  `integrations`, `seed-rows` — the rest of the app design; see
+  `integrations`, `integration-operations`, `seed-rows` — the rest of the app
+  design; see
   [App design and scaffolding](#app-design-and-scaffolding)
 - `identities` — shared visual identities; see
   [Visual identity](#visual-identity)
@@ -170,13 +171,14 @@ these resources, all scoped to project members:
 | `resources` | An API resource per entity: `path`, `operations` (`list`, `retrieve`, `create`, `update`, `delete`), `filters`, `ordering`. |
 | `roles`, `role-permissions` | A role and what it may do on a resource, with `scope` (`all`, `own`, `member`). |
 | `screens` | `name`, `route`, the `entities` shown, and an optional `parent`. |
-| `integrations` | External services and the `env_vars` they need. |
+| `integrations` | External services and the `env_vars` they need. For an inbound data API also `base_url`, auth, timeout, retries, rate limit and cache time; see [Inbound API integrations](#inbound-api-integrations). |
+| `integration-operations` | One call against an inbound data API, with parameters, paging, a real sample response and a mapping onto an entity. |
 | `seed-rows` | Example data (`data` object) per entity. |
 
 ### Generating code
 
 ```text
-GET  /api/flux/projects/{id}/scaffold/?target=django|typescript|csharp|skeleton
+GET  /api/flux/projects/{id}/scaffold/?target=django|typescript|csharp|skeleton|design|integration
 POST /api/flux/projects/{id}/scaffold-document/   {"target": "django"}
 POST /api/flux/projects/{id}/generate-tasks/
 ```
@@ -201,7 +203,11 @@ dict (`flux/services/scaffold/`), so they can be tested without a database.
   base project: for Django `manage.py`, `config/settings.py`, `config/urls.py`
   (including login endpoints for `token`/`jwt`) and `requirements.txt`; for C#
   a `.csproj` and `Program.cs`. Django is used as the backend when both
-  `django` and `csharp` are targets.
+  `django` and `csharp` are targets. `requests` (and `django-tasks` with its
+  settings, when a sync is scheduled) are added when integrations need them.
+- `integration`: for each inbound data API, a Django client, sync, tasks,
+  management command, tests and a docs page; see
+  [Inbound API integrations](#inbound-api-integrations).
 
 `scaffold-document` stores the result as a markdown document named
 `Scaffold: <target>` and updates it in place on later calls.
@@ -210,6 +216,70 @@ API, permissions, screens, tests) and never duplicates existing ones.
 
 The generated role matrix reads the role from `request.user.role`. Enforcing
 `own`/`member` scopes in `get_queryset` is left to the generated project.
+
+### Inbound API integrations
+
+An integration with a `base_url` and one or more `integration-operations`
+describes an external data API the app reads from (the pattern behind the
+Tempus sources such as Lantmäteriet and Trafikverket). The design is checked
+against a **real sample response**, so a mapping can never point at a field the
+API does not return or at a value of the wrong type.
+
+Integration settings: `base_url` (https only), `auth_type` (`none`,
+`api_key_header`, `api_key_query`, `bearer`, `basic`, `oauth_client`) with the
+settings it needs (`auth_name`, `auth_env_var`, `auth_secret_env_var`,
+`oauth_token_url`), `timeout_seconds` (1-120), `retries` (0-5),
+`rate_limit_per_minute` and `cache_ttl_seconds`. Only the *names* of
+environment variables are stored, never secrets; they are added to the
+generated `.env.example`.
+
+An operation has:
+
+- `name` (a lowercase Python identifier), `method` (`GET` or `POST`), `path`
+  (`{param}` marks path parameters) and `body_format` (`json` or `form`).
+- `params`: `{name, in, type, required, default, description}` with `in` one of
+  `query`, `path`, `body`, `header` and `type` one of `string`, `int`, `float`,
+  `bool`. Path placeholders must match the path params exactly.
+- `items_path`: dotted path to the list of records (empty if the response is the
+  list; a single object counts as one record).
+- `pagination`: `none`, `offset`, `page` or `cursor`, with `pagination_config`
+  (offset: `limit_param`, `offset_param`, `page_size`; page: `page_param`,
+  `page_size`, `first_page`, optional `size_param`; cursor: `cursor_param`,
+  `next_cursor_path`, optional `size_param` and `page_size`; all: `max_pages`,
+  default 100). A run that exceeds `max_pages` fails instead of crawling on.
+- `filters`: `{path, op, value}` with `op` one of `eq`, `ne`, `in`, `not_null`,
+  `is_null`, applied to each record (for example `meta.deleted eq false`).
+- `entity`, `mappings` (`{path, field}` from a record to an entity field or to a
+  fk/o2o relation, which stores the key), `key_field` (a plain field that
+  identifies a record), `sync`, `sync_interval_minutes` and `cache_ttl_seconds`.
+- `sample_response`: a real response captured from the live API (at most
+  200 kB). It is required as soon as there are mappings.
+
+Rules that answer `400`: the mapped paths and filter paths must exist in the
+sample; mapped values must fit the field type (`null` only for nullable
+fields); many-to-many relations cannot be mapped; `key_field` must be a mapped
+plain field; `sync` needs an entity, mappings and a `key_field`;
+`sync_interval_minutes` needs `sync`.
+
+`scaffold?target=integration` returns, per integration with operations:
+
+- `<app>/integrations/<name>.py`: the client, with one function per operation
+  (`use_cache=False` bypasses the cache), configuration errors for missing
+  environment variables, retries on `429` and `5xx` (honouring `Retry-After`),
+  a rate limiter, OAuth token reuse, pagination, filters and a `map_<operation>`
+  function.
+- `<app>/integrations/<name>_sync.py` and `management/commands/sync_<name>.py`
+  for operations with `sync`: upserts one record per item, keyed on
+  `key_field`, and skips records with a missing key or a missing required field.
+- `<app>/tasks.py` for operations with `sync_interval_minutes`: a `django_tasks`
+  task that re-queues itself, like the other background jobs.
+- `<app>/tests/test_<name>.py` with the sample responses as fixtures, and
+  `docs/integrations/<name>.md`.
+
+Only JSON responses are supported. For XML bodies, WKT geometry, OGC APIs or
+unusual paging, use the generated client as a starting point and adapt it by
+hand, as described in the Tempus guide for adding a data source.
+`generate-tasks` adds one "verify against the live API" task per operation.
 
 ### Visual identity
 
@@ -271,6 +341,10 @@ Plans (`POST codex/projects/` and `.../plan/`) also accept the design keys
 `roles`, `screens`, `integrations` and `seeds`. Items link through `ref` values
 (`source_ref`, `target_ref`, `entity_ref`, `resource_ref`, `entity_refs`,
 `parent_ref`); `entity_ref` may also name an existing entity of the project.
+
+An integration in a plan may carry `operations`; an operation names the entity
+it maps onto with `entity_ref`, and a mapping is rejected unless the operation
+has a `sample_response`.
 
 A plan can also carry `include_identity` (boolean), `identity` (creates and
 attaches a new shared identity) or `identity_id` (attaches one the token's user

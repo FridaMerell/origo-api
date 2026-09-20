@@ -1,8 +1,9 @@
 """Views for stack, resources, roles, screens, integrations and seed data."""
 from rest_framework import permissions, viewsets
 
-from flux.models import Integration, Resource, Role, RolePermission, Screen, SeedRow, StackProfile
+from flux.models import Integration, IntegrationOperation, Resource, Role, RolePermission, Screen, SeedRow, StackProfile
 from flux.serializers import (
+    IntegrationOperationSerializer,
     IntegrationSerializer,
     ResourceSerializer,
     RolePermissionSerializer,
@@ -57,6 +58,13 @@ class IntegrationViewSet(_MemberScopedViewSet):
     serializer_class = IntegrationSerializer
     queryset_model = Integration
     filterset_fields = ['id', 'project', 'kind']
+
+
+class IntegrationOperationViewSet(_MemberScopedViewSet):
+    serializer_class = IntegrationOperationSerializer
+    queryset_model = IntegrationOperation
+    member_lookup = 'integration__project__members'
+    filterset_fields = ['id', 'integration', 'integration__project', 'entity']
 
 
 class SeedRowViewSet(_MemberScopedViewSet):

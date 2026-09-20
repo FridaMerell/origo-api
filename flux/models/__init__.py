@@ -4,7 +4,7 @@ Imports remain available from ``flux.models`` for backwards compatibility.
 """
 
 from .datamodel import Entity, Field, Relation
-from .design import Integration, Resource, Role, RolePermission, Screen, SeedRow, StackProfile
+from .design import Integration, IntegrationOperation, Resource, Role, RolePermission, Screen, SeedRow, StackProfile
 from .documents import Document, Tag
 from .identity import VisualProfile
 from .planning import Milestone, Project
@@ -16,6 +16,7 @@ __all__ = [
     "Entity",
     "Field",
     "Integration",
+    "IntegrationOperation",
     "Milestone",
     "Project",
     "Relation",

@@ -1,12 +1,13 @@
 """Code scaffolding from a project's design. Generators are pure functions over a spec dict."""
 
-from . import csharp_gen, django_gen, identity_gen, skeleton, typescript_gen
+from . import csharp_gen, django_gen, identity_gen, integration_gen, skeleton, typescript_gen
 
 TARGETS = {
     "django": django_gen.generate,
     "typescript": typescript_gen.generate,
     "csharp": csharp_gen.generate,
     "design": identity_gen.generate,
+    "integration": integration_gen.generate,
     "skeleton": skeleton.generate,
 }
 

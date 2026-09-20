@@ -8,6 +8,7 @@ from flux.codex_plans import (
     CodexPlanError,
     add_task_to_private_project,
     append_plan_to_private_project,
+    upsert_relations_to_private_project,
     get_private_project_plan_for_user,
     import_project_plan_for_user,
     list_identities_for_user,
@@ -151,3 +152,17 @@ class CodexProjectPlanAppendView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(project, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectRelationsView(APIView):
+    """Create, update, or remove relations on existing project entities."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, project_id):
+        try:
+            project = upsert_relations_to_private_project(request.user, project_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(project, status=status.HTTP_200_OK)

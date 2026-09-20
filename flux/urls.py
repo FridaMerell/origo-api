@@ -6,6 +6,7 @@ from flux.views import (
     CodexProjectDocumentUpdateView,
     CodexProjectPlanDetailView,
     CodexProjectPlanAppendView,
+    CodexProjectRelationsView,
     CodexProjectPlanListView,
     CodexProjectMilestoneStatusView,
     CodexProjectScaffoldView,
@@ -14,6 +15,7 @@ from flux.views import (
     DocumentViewSet,
     EntityViewSet,
     FieldViewSet,
+    IntegrationOperationViewSet,
     IntegrationViewSet,
     MilestoneViewSet,
     ProjectViewSet,
@@ -47,6 +49,7 @@ router.register('roles', RoleViewSet, basename='role')
 router.register('role-permissions', RolePermissionViewSet, basename='role-permission')
 router.register('screens', ScreenViewSet, basename='screen')
 router.register('integrations', IntegrationViewSet, basename='integration')
+router.register('integration-operations', IntegrationOperationViewSet, basename='integration-operation')
 router.register('seed-rows', SeedRowViewSet, basename='seed-row')
 router.register('identities', VisualProfileViewSet, basename='identity')
 router.register('tasks', TaskViewSet, basename='task')
@@ -58,6 +61,7 @@ urlpatterns = [
     path('codex/projects/', CodexProjectPlanListView.as_view(), name='codex-project-list'),
     path('codex/projects/<int:project_id>/', CodexProjectPlanDetailView.as_view(), name='codex-project-detail'),
     path('codex/projects/<int:project_id>/plan/', CodexProjectPlanAppendView.as_view(), name='codex-project-plan-append'),
+    path('codex/projects/<int:project_id>/relations/', CodexProjectRelationsView.as_view(), name='codex-project-relations'),
     path('codex/projects/<int:project_id>/scaffold/', CodexProjectScaffoldView.as_view(), name='codex-project-scaffold'),
     path('codex/projects/<int:project_id>/tasks/', CodexProjectTaskCreateView.as_view(), name='codex-project-task-create'),
     path(
