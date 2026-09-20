@@ -10,8 +10,12 @@ from flux.codex_plans import (
     append_plan_to_private_project,
     get_private_project_plan_for_user,
     import_project_plan_for_user,
+    list_identities_for_user,
     list_private_project_plans_for_user,
+    scaffold_private_project,
     update_document_in_private_project,
+    update_milestone_status_in_private_project,
+    update_task_status_in_private_project,
 )
 
 
@@ -51,6 +55,30 @@ class CodexProjectPlanDetailView(APIView):
         return Response(project)
 
 
+class CodexIdentityListView(APIView):
+    """List the visual identities the token's user owns."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(list_identities_for_user(request.user))
+
+
+class CodexProjectScaffoldView(APIView):
+    """Return generated code files (django, typescript, csharp, skeleton) for a private project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, project_id):
+        try:
+            result = scaffold_private_project(request.user, project_id, request.query_params.get('target', ''))
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+
 class CodexProjectTaskCreateView(APIView):
     """Create a task under an existing private Codex project."""
 
@@ -63,6 +91,36 @@ class CodexProjectTaskCreateView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(task, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectTaskStatusView(APIView):
+    """Set the status of one task in a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, task_id):
+        try:
+            task = update_task_status_in_private_project(request.user, project_id, task_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(task)
+
+
+class CodexProjectMilestoneStatusView(APIView):
+    """Set the status of one milestone in a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, milestone_id):
+        try:
+            milestone = update_milestone_status_in_private_project(
+                request.user, project_id, milestone_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(milestone)
 
 
 class CodexProjectDocumentUpdateView(APIView):

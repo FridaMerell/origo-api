@@ -29,6 +29,7 @@ class Document(models.Model):
         MARKDOWN = "markdown", "Markdown"
         FLOWCHART = "flowchart", "Flowchart"
         DATABASE_SCHEMA = "database_schema", "Database schema"
+        DECISION = "decision", "Decision"
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="documents")
     milestone = models.ForeignKey(Milestone, on_delete=models.CASCADE, null=True, blank=True, related_name="documents")

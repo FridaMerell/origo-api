@@ -150,5 +150,5 @@ def purge_dead_web_push_subscriptions():
     logger.info("purge_dead_web_push_subscriptions: deleted %d row(s)", deleted)
 
     purge_dead_web_push_subscriptions.using(
-        run_after=WEB_PUSH_PURGE_INTERVAL
+        run_after=timezone.now() + WEB_PUSH_PURGE_INTERVAL
     ).enqueue()

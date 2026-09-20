@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title description">
+  <title id="title">Detaljerad gul- och svartvingad nattfjäril</title>
+  <desc id="description">Illustrativ vektorversion av en svart nattfjäril med krämgula vingteckningar, antenner och randiga ben.</desc>
+  <defs>
+    <linearGradient id="w" x1="0" x2=".9" y1=".1" y2="1"><stop stop-color="#383438"/><stop offset=".43" stop-color="#111113"/><stop offset="1" stop-color="#292427"/></linearGradient>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#fff7b6"/><stop offset=".42" stop-color="#e4ca55"/><stop offset="1" stop-color="#a88b2e"/></linearGradient>
+    <filter id="r"><feTurbulence baseFrequency=".72" numOctaves="2" seed="9" result="n"/><feComposite in="n" in2="SourceGraphic" operator="in" result="t"/><feBlend in="SourceGraphic" in2="t" mode="screen"/></filter>
+    <pattern id="s" width="13" height="10" patternUnits="userSpaceOnUse"><path d="M1 7q5-7 10 0q-5 4-10 0" fill="none" stroke="#827975" stroke-opacity=".48" stroke-width="1"/></pattern>
+  </defs>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- long antennae -->
+    <path d="M925 241C990 157 1056 102 1143 71" fill="none" stroke="#242124" stroke-width="10"/><path d="M929 247C982 196 1065 165 1157 170" fill="none" stroke="#3c3030" stroke-width="6"/><path d="M941 226C984 179 1035 130 1098 99" fill="none" stroke="#e9e4d8" stroke-width="5" stroke-dasharray="4 10"/>
+    <path d="M1114 83l31-12m-51 28l28-3m-49 18l25 5m-46 13l21 9m-41 10l19 12m-38 8l16 14m-34 6l13 16m-29 3l10 16" stroke="#d7d1bf" stroke-width="3"/>
+    <!-- folded wing -->
+    <path d="M929 304C840 279 742 282 648 291C550 301 424 321 302 342C180 362 78 407 58 492C41 568 80 633 162 653C243 673 362 648 472 600C588 549 704 467 808 401C855 371 895 338 929 304Z" fill="url(#w)" stroke="#1a181a" stroke-width="14"/>
+    <path d="M920 311C835 286 690 302 518 330C330 360 129 400 70 493C36 549 75 631 158 654C284 688 440 603 558 527C689 443 809 355 920 311Z" fill="url(#s)" opacity=".42"/>
+    <g fill="none" stroke="#a69d94" stroke-opacity=".29"><path d="M92 508C111 449 208 407 313 386C438 360 581 339 698 327C774 318 840 320 889 333" stroke-width="4"/><path d="M83 546C161 568 239 555 332 525C464 481 601 398 726 350" stroke-width="5"/><path d="M101 585C204 620 346 570 449 512C544 459 641 390 742 345" stroke-width="4"/><path d="M139 616C243 627 378 561 506 473C600 409 667 360 761 334" stroke-width="3"/></g>
+    <!-- characteristic yellow fields -->
+    <g fill="url(#g)" stroke="#d6bf62" stroke-width="3"><path d="M692 292C647 297 605 305 565 315C573 350 596 403 632 447C667 425 705 398 744 369C731 338 716 310 692 292Z"/><path d="M481 326C440 333 398 342 358 354C367 381 383 418 408 445C442 417 472 379 503 331Z"/><path d="M289 409C257 424 226 445 203 473C216 501 238 518 267 527C294 495 313 459 318 423Z"/><path d="M433 479C394 493 360 520 339 555C366 577 405 588 447 585C467 550 467 513 433 479Z"/><path d="M744 301C781 291 824 294 857 311C836 329 808 340 775 341C751 332 739 320 744 301Z" fill="#fff3a0"/></g>
+    <!-- individual scales in the yellow fields -->
+    <g fill="none" stroke="#fff7bf" stroke-opacity=".62" stroke-width="2"><path d="M581 326q47 15 117-5m-114 19q53 16 126-4m-118 22q54 15 124-4m-113 24q47 11 105-4m-95 24q36 7 82-6M376 366q43 13 94-6m-87 23q37 13 78-6m-67 24q29 10 58-7M215 478q34 13 79-7m-72 22q32 12 65-6M349 543q47 15 101-2m-94 17q44 14 91 0"/></g>
+    <!-- thorax/head with hair -->
+    <path d="M862 290C894 267 930 271 955 295C978 318 981 351 961 369C939 388 900 375 876 350C858 331 850 309 862 290Z" fill="#252224" stroke="#161416" stroke-width="12"/><path d="M938 278C972 270 1002 290 1006 320C1011 348 991 374 963 375C939 375 922 351 925 325C927 302 930 286 938 278Z" fill="#171517" stroke="#141214" stroke-width="11"/><path d="M869 290l-17-14m27 8l-15-19m27 16l-9-21m23 21l-2-23m16 25l5-22m6 27l12-19m0 26l16-15" stroke="#716963" stroke-width="5"/><path d="M893 296C911 284 932 286 946 300C930 314 912 317 894 310Z" fill="#f7e77b"/>
+    <!-- segmented legs -->
+    <g fill="none" stroke="#1b191b"><path d="M886 349L845 411L786 475L756 572" stroke-width="15"/><path d="M910 354L935 420L969 504L1020 614" stroke-width="15"/><path d="M855 359L816 414L778 444" stroke-width="13"/><path d="M756 572l-26 27m26-27l2 34m262 8l34 24m-34-24l-1 33M778 444l-29 28m29-28l-2 28" stroke-width="9"/></g><g stroke="#ede8d9" stroke-width="7"><path d="M830 431l-15 17m-17 16l-15 18m-26 40l-12 21m204-86l10 22m18 45l11 23m13 31l10 21"/></g>
+    <!-- fuzzy lower fringe -->
+    <path d="M77 549l-20 9m27 9l-20 10m31 7l-18 12m35 5l-16 13m38 2l-14 15m40-3l-12 15m40-6l-8 16m38-12l-5 17m38-21l-2 17m36-25l4 17m30-30l7 16m28-29l10 15m25-30l12 14m22-29l13 13m21-29l14 12m19-28l15 10m16-29l16 9" stroke="#625b57" stroke-width="5"/>
+    <g fill="#f8f3d8" opacity=".75"><ellipse cx="541" cy="329" rx="4" ry="2"/><ellipse cx="520" cy="334" rx="3" ry="2"/><ellipse cx="498" cy="339" rx="5" ry="2"/><ellipse cx="526" cy="352" rx="3" ry="2"/><ellipse cx="345" cy="370" rx="4" ry="2"/><ellipse cx="327" cy="376" rx="3" ry="2"/><ellipse cx="463" cy="475" rx="3" ry="2"/></g>
+  </g>
+</svg>

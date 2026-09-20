@@ -317,7 +317,7 @@ def notify_followed_species_season_start():
     if today.weekday() != 6:
         days_until_sunday = (6 - today.weekday()) % 7 or 7
         notify_followed_species_season_start.using(
-            run_after=timedelta(days=days_until_sunday)
+            run_after=timezone.now() + timedelta(days=days_until_sunday)
         ).enqueue()
         return {"created": 0, "skipped": "not_sunday"}
 
@@ -395,7 +395,9 @@ def notify_followed_species_season_start():
         "notify_followed_species_season_start: created %d notification(s)",
         created,
     )
-    notify_followed_species_season_start.using(run_after=timedelta(days=7)).enqueue()
+    notify_followed_species_season_start.using(
+        run_after=timezone.now() + timedelta(days=7)
+    ).enqueue()
     return {"created": created}
 
 
@@ -559,4 +561,6 @@ def purge_birdnet_detections():
     deleted, _ = BirdnetDetection.objects.filter(detected_at__lt=cutoff).delete()
     logger.info("purge_birdnet_detections: deleted %d row(s)", deleted)
 
-    purge_birdnet_detections.using(run_after=BIRDNET_PURGE_INTERVAL).enqueue()
+    purge_birdnet_detections.using(
+        run_after=timezone.now() + BIRDNET_PURGE_INTERVAL
+    ).enqueue()

@@ -5,7 +5,27 @@ from datetime import date
 from django.db import transaction
 from django.db.models import Count
 
-from flux.models import Document, Milestone, Project, Task, Update
+from flux.models import (
+    Document,
+    Entity,
+    Field,
+    Integration,
+    Milestone,
+    Project,
+    Relation,
+    Resource,
+    Role,
+    RolePermission,
+    Screen,
+    SeedRow,
+    StackProfile,
+    Task,
+    Update,
+    VisualProfile,
+)
+from flux.services.scaffold import ScaffoldError, generate_files
+from flux.services.scaffold import identity as identity_rules
+from flux.services.scaffold.spec import build_spec, unknown_seed_keys
 
 
 class CodexPlanError(ValueError):
@@ -70,6 +90,39 @@ def _optional_id(value, field):
     return value
 
 
+def _bool(item, field, default=False):
+    value = item.get(field, default)
+    if not isinstance(value, bool):
+        raise CodexPlanError(f'{field} must be true or false.')
+    return value
+
+
+def _max_length(value, field):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CodexPlanError(f'{field} must be a positive integer or null.')
+    return value
+
+
+def _scalar_text(value, field, *, maximum=255):
+    """Accept text, numbers and booleans for values that are stored as text (e.g. a field default)."""
+    if isinstance(value, bool):
+        value = 'true' if value else 'false'
+    elif isinstance(value, (int, float)):
+        value = str(value)
+    return _text(value, field, maximum=maximum)
+
+
+def _string_list(item, field, allowed=None):
+    value = item.get(field, [])
+    if not isinstance(value, list) or not all(isinstance(entry, str) for entry in value):
+        raise CodexPlanError(f'{field} must be a list of strings.')
+    if allowed is not None and set(value) - set(allowed):
+        raise CodexPlanError(f'{field} contains an invalid value.')
+    return value
+
+
 def _validate_parent_refs(parent_refs):
     for ref in parent_refs:
         seen = set()
@@ -90,6 +143,8 @@ def serialize_project(project):
         'id': project.id,
         'name': project.name,
         'description': project.description,
+        'include_identity': project.include_identity,
+        'identity_id': project.identity_id,
         'milestones': [
             {
                 'id': item.id,
@@ -136,6 +191,99 @@ def serialize_project(project):
             }
             for item in project.documents.order_by('id')
         ],
+        'entities': [
+            {
+                'id': entity.id,
+                'name': entity.name,
+                'description': entity.description,
+                'fields': [
+                    {
+                        'id': field.id,
+                        'name': field.name,
+                        'type': field.type,
+                        'description': field.description,
+                        'nullable': field.nullable,
+                        'unique': field.unique,
+                        'default': field.default,
+                        'max_length': field.max_length,
+                    }
+                    for field in entity.fields.all()
+                ],
+            }
+            for entity in project.entities.prefetch_related('fields').order_by('id')
+        ],
+        'relations': [
+            {
+                'id': item.id,
+                'source_id': item.source_id,
+                'target_id': item.target_id,
+                'kind': item.kind,
+                'name': item.name,
+                'related_name': item.related_name,
+                'on_delete': item.on_delete,
+                'nullable': item.nullable,
+                'description': item.description,
+            }
+            for item in Relation.objects.filter(source__project=project).order_by('id')
+        ],
+        'stack_profile': _serialize_stack_profile(project),
+        'resources': [
+            {
+                'id': item.id,
+                'entity_id': item.entity_id,
+                'path': item.path,
+                'operations': item.operations,
+                'filters': item.filters,
+                'ordering': item.ordering,
+            }
+            for item in Resource.objects.filter(entity__project=project).order_by('id')
+        ],
+        'roles': [
+            {
+                'id': role.id,
+                'name': role.name,
+                'description': role.description,
+                'permissions': [
+                    {'resource_id': p.resource_id, 'operation': p.operation, 'scope': p.scope}
+                    for p in role.permissions.all()
+                ],
+            }
+            for role in project.roles.prefetch_related('permissions').order_by('id')
+        ],
+        'screens': [
+            {
+                'id': screen.id,
+                'name': screen.name,
+                'route': screen.route,
+                'description': screen.description,
+                'entity_ids': [entity.id for entity in screen.entities.all()],
+                'parent_id': screen.parent_id,
+            }
+            for screen in project.screens.prefetch_related('entities').order_by('id')
+        ],
+        'integrations': [
+            {'id': item.id, 'name': item.name, 'kind': item.kind, 'description': item.description, 'env_vars': item.env_vars}
+            for item in project.integrations.order_by('id')
+        ],
+        'seeds': [
+            {'id': row.id, 'entity_id': row.entity_id, 'data': row.data, 'order': row.order}
+            for row in SeedRow.objects.filter(entity__project=project).order_by('id')
+        ],
+    }
+
+
+def _serialize_stack_profile(project):
+    try:
+        stack = project.stack_profile
+    except StackProfile.DoesNotExist:
+        return None
+    return {
+        'targets': stack.targets,
+        'api_naming': stack.api_naming,
+        'auth_method': stack.auth_method,
+        'database': stack.database,
+        'app_label': stack.app_label,
+        'namespace': stack.namespace,
     }
 
 
@@ -146,6 +294,8 @@ def _append_plan_to_project(project, user, plan):
     task_payloads = _items(plan, 'tasks')
     update_payloads = _items(plan, 'updates')
     document_payloads = _items(plan, 'documents')
+    entity_payloads = _items(plan, 'entities')
+    relation_payloads = _items(plan, 'relations')
 
     milestones = {}
     for item in milestone_payloads:
@@ -218,6 +368,292 @@ def _append_plan_to_project(project, user, plan):
             content=_text(item.get('content'), 'document.content', maximum=100000),
             author=user,
         )
+
+    entities = {}
+    for item in entity_payloads:
+        ref = _ref(item, 'ref')
+        if ref in entities:
+            raise CodexPlanError(f'Duplicate entity ref: {ref}.')
+        entity_name = _text(item.get('name'), 'entity.name', required=True, maximum=100)
+        if project.entities.filter(name=entity_name).exists() or any(e.name == entity_name for e in entities.values()):
+            raise CodexPlanError(f'Entity name already exists in this project: {entity_name}.')
+        entities[ref] = Entity.objects.create(
+            project=project,
+            name=entity_name,
+            description=_text(item.get('description'), 'entity.description', maximum=10000),
+        )
+        field_payloads = _items(item, 'fields')
+        field_names = set()
+        for order, field_item in enumerate(field_payloads):
+            field_name = _text(field_item.get('name'), 'field.name', required=True, maximum=100)
+            if field_name in field_names:
+                raise CodexPlanError(f'Duplicate field name in {entity_name}: {field_name}.')
+            field_names.add(field_name)
+            Field.objects.create(
+                entity=entities[ref],
+                name=field_name,
+                type=_choice(field_item, 'type', Field.Type.values, Field.Type.STRING),
+                description=_text(field_item.get('description'), 'field.description', maximum=10000),
+                nullable=_bool(field_item, 'nullable'),
+                unique=_bool(field_item, 'unique'),
+                default=_scalar_text(field_item.get('default'), 'field.default'),
+                max_length=_max_length(field_item.get('max_length'), 'field.max_length'),
+                order=order,
+            )
+
+    relation_names = set()
+    for item in relation_payloads:
+        source_ref, target_ref = item.get('source_ref'), item.get('target_ref')
+        if source_ref not in entities:
+            raise CodexPlanError(f'Unknown source_ref: {source_ref}.')
+        if target_ref not in entities:
+            raise CodexPlanError(f'Unknown target_ref: {target_ref}.')
+        relation_name = _text(item.get('name'), 'relation.name', required=True, maximum=100)
+        if (source_ref, relation_name) in relation_names:
+            raise CodexPlanError(f'Duplicate relation name on {source_ref}: {relation_name}.')
+        if entities[source_ref].fields.filter(name=relation_name).exists():
+            raise CodexPlanError(f'Relation name {relation_name} clashes with a field on {source_ref}.')
+        relation_names.add((source_ref, relation_name))
+        Relation.objects.create(
+            source=entities[source_ref],
+            target=entities[target_ref],
+            kind=_choice(item, 'kind', Relation.Kind.values, Relation.Kind.FOREIGN_KEY),
+            name=relation_name,
+            related_name=_text(item.get('related_name'), 'relation.related_name', maximum=100),
+            on_delete=_choice(item, 'on_delete', Relation.OnDelete.values, Relation.OnDelete.CASCADE),
+            nullable=_bool(item, 'nullable'),
+            description=_text(item.get('description'), 'relation.description', maximum=10000),
+        )
+
+    _append_design_to_project(project, user, plan, entities)
+
+
+_IDENTITY_TEXT_FIELDS = {
+    'description': 10000, 'brand_name': 120, 'tagline': 255, 'tone': 10000,
+    'logo_rules': 10000, 'icon_library': 60, 'icon_style': 60, 'guidelines': 100000,
+}
+
+
+def _number_in_range(item, key, low, high, default):
+    value = item.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+        raise CodexPlanError(f'identity.{key} must be a number between {low} and {high}.')
+    return value
+
+
+def _create_identity(user, item):
+    if not isinstance(item, dict):
+        raise CodexPlanError('identity must be an object.')
+    name = _text(item.get('name'), 'identity.name', required=True, maximum=120)
+    if VisualProfile.objects.filter(owner=user, name=name).exists():
+        raise CodexPlanError(f'You already have an identity named {name}; use identity_id to reuse it.')
+    values = {key: _text(item.get(key), f'identity.{key}', maximum=limit) for key, limit in _IDENTITY_TEXT_FIELDS.items()}
+    values['theme_modes'] = _choice(item, 'theme_modes', VisualProfile.ThemeModes.values, VisualProfile.ThemeModes.BOTH)
+    values['default_mode'] = _choice(item, 'default_mode', VisualProfile.DefaultMode.values, VisualProfile.DefaultMode.SYSTEM)
+    try:
+        if 'colors' in item:
+            values['colors'] = identity_rules.clean_colors(item['colors'], values['theme_modes'])
+        if 'shadows_dark' in item:
+            values['shadows_dark'] = identity_rules.clean_shadows(item['shadows_dark'])
+        for key in ('heading_font', 'body_font', 'mono_font'):
+            values[key] = identity_rules.clean_font_name(item.get(key), key)
+        values['font_import_url'] = identity_rules.clean_import_url(item.get('font_import_url'))
+        if 'font_weights' in item:
+            values['font_weights'] = identity_rules.clean_font_weights(item['font_weights'])
+        if 'radii' in item:
+            values['radii'] = identity_rules.clean_radii(item['radii'])
+        if 'shadows' in item:
+            values['shadows'] = identity_rules.clean_shadows(item['shadows'])
+        if 'assets' in item:
+            values['assets'] = identity_rules.clean_assets(item['assets'])
+    except ValueError as exc:
+        raise CodexPlanError(str(exc)) from exc
+    values['base_font_size'] = _number_in_range(item, 'base_font_size', 8, 32, 16)
+    values['type_scale_ratio'] = _number_in_range(item, 'type_scale_ratio', 1, 2, 1.25)
+    values['spacing_unit'] = _number_in_range(item, 'spacing_unit', 1, 16, 4)
+    values['accessibility_target'] = _choice(
+        item, 'accessibility_target', VisualProfile.AccessibilityTarget.values, VisualProfile.AccessibilityTarget.AA
+    )
+    return VisualProfile.objects.create(owner=user, name=name, **values)
+
+
+def _apply_identity(project, user, plan):
+    """``identity`` creates and attaches a new profile, ``identity_id`` reuses one you own."""
+    changed = False
+    if plan.get('identity') is not None:
+        project.identity = _create_identity(user, plan['identity'])
+        project.include_identity = True
+        changed = True
+    elif plan.get('identity_id') is not None:
+        identity_id = _optional_id(plan['identity_id'], 'identity_id')
+        try:
+            project.identity = VisualProfile.objects.get(pk=identity_id, owner=user)
+        except VisualProfile.DoesNotExist as exc:
+            raise CodexPlanError('identity_id must be an identity you own.') from exc
+        project.include_identity = True
+        changed = True
+    if 'include_identity' in plan:
+        if not isinstance(plan['include_identity'], bool):
+            raise CodexPlanError('include_identity must be true or false.')
+        project.include_identity = plan['include_identity']
+        if not project.include_identity:
+            project.identity = None
+        changed = True
+    if changed:
+        project.save(update_fields=['include_identity', 'identity', 'updated_at'])
+
+
+def _serialize_identity(profile):
+    data = {
+        key: getattr(profile, key)
+        for key in (
+            'id', 'name', 'description', 'brand_name', 'tagline', 'tone', 'theme_modes', 'default_mode', 'colors',
+            'heading_font', 'body_font', 'mono_font', 'font_import_url', 'font_weights', 'base_font_size',
+            'spacing_unit', 'radii', 'shadows', 'shadows_dark', 'assets', 'logo_rules', 'icon_library', 'icon_style', 'accessibility_target', 'guidelines',
+        )
+    }
+    data['type_scale_ratio'] = float(profile.type_scale_ratio)
+    return data
+
+
+def list_identities_for_user(user):
+    """Identities the token's user owns; use one of these ids as ``identity_id`` in a plan."""
+    return [_serialize_identity(profile) for profile in VisualProfile.objects.filter(owner=user)]
+
+
+def _append_design_to_project(project, user, plan, entities):
+    """Import stack profile, resources, roles, screens, integrations and seeds.
+
+    ``entity_ref``/``entity_refs`` may name an entity from this payload or an
+    existing entity of the project by name.
+    """
+    _apply_identity(project, user, plan)
+    lookup = {entity.name: entity for entity in project.entities.all()}
+    lookup.update(entities)
+
+    def entity_for(ref, field):
+        if ref not in lookup:
+            raise CodexPlanError(f'Unknown {field}: {ref}.')
+        return lookup[ref]
+
+    stack = plan.get('stack_profile')
+    if stack is not None:
+        if not isinstance(stack, dict):
+            raise CodexPlanError('stack_profile must be an object.')
+        if StackProfile.objects.filter(project=project).exists():
+            raise CodexPlanError('This project already has a stack_profile.')
+        StackProfile.objects.create(
+            project=project,
+            targets=_string_list(stack, 'targets', ['django', 'typescript', 'csharp']),
+            api_naming=_choice(stack, 'api_naming', StackProfile.ApiNaming.values, StackProfile.ApiNaming.SNAKE_CASE),
+            auth_method=_choice(stack, 'auth_method', StackProfile.AuthMethod.values, StackProfile.AuthMethod.SESSION),
+            database=_choice(stack, 'database', StackProfile.Database.values, StackProfile.Database.POSTGRESQL),
+            app_label=_text(stack.get('app_label'), 'stack_profile.app_label', maximum=100),
+            namespace=_text(stack.get('namespace'), 'stack_profile.namespace', maximum=200),
+        )
+
+    resources = {}
+    for item in _items(plan, 'resources'):
+        entity = entity_for(item.get('entity_ref'), 'entity_ref')
+        if Resource.objects.filter(entity=entity).exists():
+            raise CodexPlanError(f'Entity {entity.name} already has a resource.')
+        resources[entity.name] = Resource.objects.create(
+            entity=entity,
+            path=_text(item.get('path'), 'resource.path', required=True, maximum=100),
+            operations=_string_list(item, 'operations', Resource.Operation.values),
+            filters=_string_list(item, 'filters'),
+            ordering=_text(item.get('ordering'), 'resource.ordering', maximum=100),
+        )
+
+    role_names = set(project.roles.values_list('name', flat=True))
+    for item in _items(plan, 'roles'):
+        role_name = _text(item.get('name'), 'role.name', required=True, maximum=100)
+        if role_name in role_names:
+            raise CodexPlanError(f'Role name already exists in this project: {role_name}.')
+        role_names.add(role_name)
+        role = Role.objects.create(
+            project=project,
+            name=role_name,
+            description=_text(item.get('description'), 'role.description', maximum=10000),
+        )
+        granted = set()
+        for permission in _items(item, 'permissions'):
+            entity = entity_for(permission.get('resource_ref'), 'resource_ref')
+            resource = resources.get(entity.name) or Resource.objects.filter(entity=entity).first()
+            if resource is None:
+                raise CodexPlanError(f'Entity {entity.name} has no resource to grant permissions on.')
+            operation = _choice(permission, 'operation', Resource.Operation.values, Resource.Operation.LIST)
+            if (resource.pk, operation) in granted:
+                raise CodexPlanError(f'Role {role_name} grants {operation} on {entity.name} more than once.')
+            granted.add((resource.pk, operation))
+            RolePermission.objects.create(
+                role=role,
+                resource=resource,
+                operation=operation,
+                scope=_choice(permission, 'scope', RolePermission.Scope.values, RolePermission.Scope.ALL),
+            )
+
+    routes = set(project.screens.values_list('route', flat=True))
+    screens = {}
+    for item in _items(plan, 'screens'):
+        ref = _ref(item, 'ref')
+        if ref in screens:
+            raise CodexPlanError(f'Duplicate screen ref: {ref}.')
+        route = _text(item.get('route'), 'screen.route', required=True)
+        if route in routes:
+            raise CodexPlanError(f'Screen route already exists in this project: {route}.')
+        routes.add(route)
+        screens[ref] = Screen.objects.create(
+            project=project,
+            name=_text(item.get('name'), 'screen.name', required=True, maximum=100),
+            route=route,
+            description=_text(item.get('description'), 'screen.description', maximum=10000),
+        )
+        screens[ref].entities.set([entity_for(name, 'entity_refs') for name in _string_list(item, 'entity_refs')])
+    for item in _items(plan, 'screens'):
+        parent_ref = item.get('parent_ref')
+        if parent_ref is not None:
+            if parent_ref not in screens:
+                raise CodexPlanError(f'Unknown parent_ref: {parent_ref}.')
+            if parent_ref == item['ref']:
+                raise CodexPlanError('A screen cannot be its own parent.')
+            screens[item['ref']].parent = screens[parent_ref]
+            screens[item['ref']].save(update_fields=['parent'])
+
+    integration_names = set(project.integrations.values_list('name', flat=True))
+    for item in _items(plan, 'integrations'):
+        integration_name = _text(item.get('name'), 'integration.name', required=True, maximum=100)
+        if integration_name in integration_names:
+            raise CodexPlanError(f'Integration name already exists in this project: {integration_name}.')
+        integration_names.add(integration_name)
+        Integration.objects.create(
+            project=project,
+            name=integration_name,
+            kind=_choice(item, 'kind', Integration.Kind.values, Integration.Kind.API),
+            description=_text(item.get('description'), 'integration.description', maximum=10000),
+            env_vars=_string_list(item, 'env_vars'),
+        )
+
+    for item in _items(plan, 'seeds'):
+        entity = entity_for(item.get('entity_ref'), 'entity_ref')
+        next_order = entity.seed_rows.count()
+        for offset, row in enumerate(_items(item, 'rows')):
+            unknown = unknown_seed_keys(entity, row)
+            if unknown:
+                raise CodexPlanError(f'Seed row for {entity.name} has unknown keys: {", ".join(unknown)}.')
+            SeedRow.objects.create(entity=entity, data=row, order=next_order + offset)
+
+
+def scaffold_private_project(user, project_id, target):
+    """Return generated ``[{path, content}]`` files for one target of a private project."""
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        return {'target': target, 'files': generate_files(build_spec(project), target)}
+    except ScaffoldError as exc:
+        raise CodexPlanError(str(exc)) from exc
 
 
 def import_project_plan_for_user(user, plan):
@@ -374,3 +810,29 @@ def add_task_to_private_project(user, project_id, task_data):
         'status': task.status,
         'created_at': task.created_at.isoformat(),
     }
+
+
+def _set_status(user, project_id, model, item_id, payload, label):
+    if not isinstance(payload, dict) or 'status' not in payload:
+        raise CodexPlanError('status is required.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        item = model.objects.get(pk=item_id, project=project)
+    except model.DoesNotExist as exc:
+        raise CodexPlanError(f'{label} not found in this project.') from exc
+    item.status = _choice(payload, 'status', model.Status.values, item.status)
+    item.save(update_fields=['status', 'updated_at'])
+    return {'id': item.id, 'project_id': project.id, 'title': item.title, 'status': item.status}
+
+
+def update_task_status_in_private_project(user, project_id, task_id, payload):
+    """Set the status of one task; saving goes through the model so recurrence signals still fire."""
+    return _set_status(user, project_id, Task, task_id, payload, 'Task')
+
+
+def update_milestone_status_in_private_project(user, project_id, milestone_id, payload):
+    """Set the status of one milestone in an existing private project."""
+    return _set_status(user, project_id, Milestone, milestone_id, payload, 'Milestone')

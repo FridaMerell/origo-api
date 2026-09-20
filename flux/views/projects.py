@@ -1,7 +1,7 @@
 """Project CRUD and the aggregate project board."""
 from django.http import Http404
 from django.db.models import Count, Prefetch, Q, Subquery
-from rest_framework import permissions, viewsets
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -14,6 +14,9 @@ from flux.serializers import (
     TaskSerializer,
     UpdateSerializer,
 )
+from flux.services.planning import generate_tasks
+from flux.services.scaffold import ScaffoldError, generate_files
+from flux.services.scaffold.spec import build_spec
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -34,6 +37,42 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         project = serializer.save()
         project.members.add(self.request.user)
+
+    @action(detail=True, methods=['get'])
+    def scaffold(self, request, pk=None):
+        target = request.query_params.get('target', '')
+        try:
+            files = generate_files(build_spec(self.get_object()), target)
+        except ScaffoldError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'target': target, 'files': files})
+
+    @action(detail=True, methods=['post'], url_path='scaffold-document')
+    def scaffold_document(self, request, pk=None):
+        project = self.get_object()
+        target = request.data.get('target', '')
+        try:
+            files = generate_files(build_spec(project), target)
+        except ScaffoldError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        content = '\n\n'.join(f'## `{item["path"]}`\n\n````\n{item["content"]}````' for item in files)
+        title = f'Scaffold: {target}'
+        document = Document.objects.filter(project=project, title=title).order_by('id').first()
+        if document is None:
+            document = Document(project=project, title=title)
+        document.kind = Document.Kind.MARKDOWN
+        document.content = content
+        document.author = request.user
+        document.save()
+        return Response(DocumentSerializer(document, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='generate-tasks')
+    def generate_project_tasks(self, request, pk=None):
+        created = generate_tasks(self.get_object())
+        return Response(
+            {'created': [{'id': task.id, 'title': task.title, 'milestone': task.milestone_id} for task in created]},
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['get'])
     def board(self, request, pk=None):

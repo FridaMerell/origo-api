@@ -9,8 +9,25 @@ from flux.models import Project
 class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ["id", "name", "description", "members", "created_at", "updated_at", "files", "tags"]
+        fields = [
+            "id", "name", "description", "members", "created_at", "updated_at", "files", "tags",
+            "include_identity", "identity",
+        ]
         read_only_fields = ["created_at", "updated_at"]
+
+    def validate_identity(self, identity):
+        if identity is None:
+            return identity
+        current_id = getattr(self.instance, "identity_id", None)
+        if identity.pk != current_id and identity.owner_id != self.context["request"].user.pk:
+            raise serializers.ValidationError("You can only choose an identity you own.")
+        return identity
+
+    def validate(self, attrs):
+        include = attrs.get("include_identity", getattr(self.instance, "include_identity", False))
+        if not include:
+            attrs["identity"] = None
+        return attrs
 
     def validate_tags(self, tags):
         request = self.context["request"]

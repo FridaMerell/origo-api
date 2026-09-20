@@ -83,5 +83,7 @@ def notify_flux_task_deadlines():
             created += 1
 
     logger.info("notify_flux_task_deadlines: created %d notification(s)", created)
-    notify_flux_task_deadlines.using(run_after=timedelta(days=1)).enqueue()
+    notify_flux_task_deadlines.using(
+        run_after=timezone.now() + timedelta(days=1)
+    ).enqueue()
     return {"created": created}

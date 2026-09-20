@@ -12,6 +12,10 @@ class Project(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     files = models.JSONField(blank=True, default=list)
     tags = models.ManyToManyField("Tag", blank=True, related_name="projects")
+    include_identity = models.BooleanField(default=False)
+    identity = models.ForeignKey(
+        "VisualProfile", on_delete=models.SET_NULL, null=True, blank=True, related_name="projects"
+    )
 
     def __str__(self):
         return self.name
