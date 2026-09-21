@@ -134,22 +134,57 @@ class DesignGeneratorTests(unittest.TestCase):
         self.assertEqual(
             sorted(design_files()),
             [
-                'identity/STYLEGUIDE.md', 'identity/assets.ts', 'identity/fonts.css', 'identity/tailwind.theme.css',
+                'app/globals.css', 'identity/STYLEGUIDE.md', 'identity/assets.ts', 'identity/fonts.css', 'identity/tailwind.theme.css',
                 'identity/tailwind.theme.ts', 'identity/tokens.css', 'identity/tokens.ts',
             ],
         )
 
+    def test_globals_css_is_an_origo_tailwind_entrypoint_with_semantic_tokens(self):
+        css = design_files()['app/globals.css']
+
+        self.assertIn('@import "tailwindcss";', css)
+        self.assertIn('@theme inline {', css)
+        self.assertIn('--color-background: var(--background);', css)
+        self.assertIn('--color-card: var(--card);', css)
+        self.assertIn('--color-chart-5: var(--chart-5);', css)
+        self.assertIn('--font-sans: var(--font-body-family);', css)
+        self.assertIn('--radius-md: calc(var(--radius) - 2px);', css)
+        self.assertIn(':root {\n  color-scheme: light;\n  --background: #ffffff;', css)
+        self.assertIn('.dark, :root[data-theme="dark"] {', css)
+        self.assertIn('--primary: #6b9dff;', css)
+
+    def test_globals_css_uses_stable_defaults_when_roles_are_absent(self):
+        css = design_files(make_identity(colors=[], heading_font='', body_font='', mono_font='', radii={}, shadows={}))['app/globals.css']
+
+        self.assertIn('--destructive: #dc2626;', css)
+        self.assertIn('--font-body-family: system-ui, sans-serif;', css)
+        self.assertIn('--radius: 10px;', css)
+
+    def test_globals_css_tolerates_a_sparse_legacy_identity(self):
+        css = design_files({'name': 'Legacy'})['app/globals.css']
+
+        self.assertIn('--background: #ffffff;', css)
+        self.assertIn('.dark, :root[data-theme="dark"] {', css)
+
+    def test_globals_css_only_emits_the_dark_class_for_dark_capable_identities(self):
+        light = design_files(make_identity(theme_modes='light', colors=LIGHT_ONLY))['app/globals.css']
+        dark = design_files(make_identity(theme_modes='dark', colors=DARK_ONLY))['app/globals.css']
+
+        self.assertNotIn('.dark, :root[data-theme="dark"]', light)
+        self.assertIn(':root {\n  color-scheme: dark;', dark)
+        self.assertIn('.dark, :root[data-theme="dark"] {', dark)
+
     def test_tokens_css_has_light_and_dark_values(self):
         css = design_files()['identity/tokens.css']
 
-        self.assertIn('--brand-primary: #0b5fff;', css)
-        self.assertIn('--brand-primary: #6b9dff;', css)
+        self.assertIn('--primary: #0b5fff;', css)
+        self.assertIn('--primary: #6b9dff;', css)
         self.assertIn(':root[data-theme="dark"]', css)
         self.assertIn('prefers-color-scheme: dark', css)
-        self.assertIn('--brand-radius-md: 8px;', css)
-        self.assertIn('--brand-shadow-card: 0 1px 3px rgba(0,0,0,0.2);', css)
-        self.assertIn('--brand-text-lg: 1.25rem;', css)
-        self.assertIn('--brand-text-sm: 0.8rem;', css)
+        self.assertIn('--radius: 8px;', css)
+        self.assertIn('--shadow-card: 0 1px 3px rgba(0,0,0,0.2);', css)
+        self.assertIn('--font-size-lg: 1.25rem;', css)
+        self.assertIn('--font-size-sm: 0.8rem;', css)
 
     def test_light_only_identity_has_no_dark_block(self):
         colors = [{'name': 'Text', 'role': 'text', 'light': '#000000', 'dark': ''}]
@@ -163,22 +198,22 @@ class DesignGeneratorTests(unittest.TestCase):
         css = design_files()['identity/fonts.css']
 
         self.assertTrue(css.startswith('@import url("https://fonts.googleapis.com'))
-        self.assertIn('--brand-font-heading: "Fraunces", system-ui, sans-serif;', css)
-        self.assertNotIn('--brand-font-mono', css)
+        self.assertIn('--font-heading-family: "Fraunces", system-ui, sans-serif;', css)
+        self.assertIn('--font-mono-family: ui-monospace, monospace;', css)
 
     def test_tailwind_v4_theme_maps_through_the_brand_variables(self):
         css = design_files()['identity/tailwind.theme.css']
 
         self.assertIn('@theme inline {', css)
-        self.assertIn('--color-primary: var(--brand-primary);', css)
-        self.assertIn('--font-heading: var(--brand-font-heading);', css)
-        self.assertIn('--radius-md: var(--brand-radius-md);', css)
-        self.assertIn('--shadow-card: var(--brand-shadow-card);', css)
+        self.assertIn('--color-primary: var(--primary);', css)
+        self.assertIn('--font-heading: var(--font-heading-family);', css)
+        self.assertIn('--radius-md: calc(var(--radius) - 2px);', css)
+        self.assertIn('--shadow-elevation-card: var(--shadow-card);', css)
 
     def test_typescript_files_are_generated(self):
         files = design_files()
 
-        self.assertIn('"primary": "var(--brand-primary)"', files['identity/tailwind.theme.ts'])
+        self.assertIn('"primary": "var(--primary)"', files['identity/tailwind.theme.ts'])
         self.assertIn('export const tokens = {', files['identity/tokens.ts'])
         self.assertIn('"primary": "#6b9dff"', files['identity/tokens.ts'])
         self.assertIn('"library": "lucide"', files['identity/assets.ts'])
@@ -193,7 +228,7 @@ class DesignGeneratorTests(unittest.TestCase):
 
         self.assertIn('# Visual identity: Origo', guide)
         self.assertIn('Warm and direct.', guide)
-        self.assertIn('| Primary | primary | `#0b5fff` | `#6b9dff` | `--brand-primary` |', guide)
+        self.assertIn('| Primary | primary | `#0b5fff` | `#6b9dff` | `--primary` |', guide)
         self.assertIn('text on background', guide)
         self.assertIn('Minimum 24px high.', guide)
         self.assertIn('lucide', guide)
@@ -260,9 +295,9 @@ class ThemeModeGeneratorTests(unittest.TestCase):
     def test_system_default_follows_prefers_color_scheme(self):
         css = self.css(default_mode='system')
 
-        self.assertIn('color-scheme: light dark;', css)
+        self.assertIn('color-scheme: light;', css)
         self.assertIn('@media (prefers-color-scheme: dark)', css)
-        self.assertIn(':root:not([data-theme="light"])', css)
+        self.assertIn(':root:not(.light):not([data-theme="light"])', css)
         self.assertIn(':root[data-theme="dark"]', css)
         self.assertIn(':root[data-theme="light"]', css)
 
@@ -270,22 +305,23 @@ class ThemeModeGeneratorTests(unittest.TestCase):
         css = self.css(default_mode='light')
 
         self.assertNotIn('prefers-color-scheme', css)
-        self.assertIn(':root {\n  color-scheme: light;\n  --brand-primary: #0b5fff;', css)
-        self.assertIn(':root[data-theme="dark"] {\n  color-scheme: dark;\n  --brand-primary: #6b9dff;', css)
+        self.assertIn(':root {\n  color-scheme: light;\n  --background: #ffffff;', css)
+        self.assertIn('.dark, :root[data-theme="dark"] {\n  color-scheme: dark;', css)
+        self.assertIn('--brand-primary: #6b9dff;', css)
 
     def test_dark_default_puts_dark_values_on_root(self):
         css = self.css(default_mode='dark')
 
         self.assertNotIn('prefers-color-scheme', css)
-        self.assertIn(':root {\n  color-scheme: dark;\n  --brand-primary: #6b9dff;', css)
-        self.assertIn(':root[data-theme="light"] {\n  color-scheme: light;\n  --brand-primary: #0b5fff;', css)
+        self.assertIn(':root {\n  color-scheme: dark;\n  --background: #0b0d12;', css)
+        self.assertIn('.light, :root[data-theme="light"] {\n  color-scheme: light;', css)
 
     def test_dark_only_identity_has_a_single_dark_root(self):
         css = self.css(theme_modes='dark', colors=DARK_ONLY)
 
         self.assertIn('color-scheme: dark;', css)
         self.assertIn('--brand-text: #eeeeee;', css)
-        self.assertNotIn('data-theme', css)
+        self.assertIn('.dark, :root[data-theme="dark"]', css)
         self.assertNotIn('prefers-color-scheme', css)
         self.assertNotIn('--brand-text: ;', css)
 
@@ -306,13 +342,13 @@ class ThemeModeGeneratorTests(unittest.TestCase):
         identity = make_identity(shadows={}, shadows_dark={'glow': '0 0 8px #fff'})
         files = design_files(identity)
 
-        self.assertIn('--shadow-glow: var(--brand-shadow-glow);', files['identity/tailwind.theme.css'])
-        self.assertIn('"glow"', files['identity/tailwind.theme.ts'])
+        self.assertIn('--shadow-elevation-glow: var(--shadow-glow);', files['identity/tailwind.theme.css'])
+        self.assertIn('"elevation-glow"', files['identity/tailwind.theme.ts'])
 
     def test_tailwind_dark_variant_follows_data_theme_only_when_toggled(self):
-        variant = '@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));'
+        variant = '@custom-variant dark (&:where(.dark, .dark *));'
 
-        self.assertNotIn('@custom-variant', design_files(make_identity(default_mode='system'))['identity/tailwind.theme.css'])
+        self.assertIn(variant, design_files(make_identity(default_mode='system'))['identity/tailwind.theme.css'])
         self.assertIn(variant, design_files(make_identity(default_mode='light'))['identity/tailwind.theme.css'])
         self.assertNotIn('@custom-variant', design_files(make_identity(theme_modes='light', colors=LIGHT_ONLY))['identity/tailwind.theme.css'])
 
