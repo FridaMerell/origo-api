@@ -792,6 +792,116 @@ def append_plan_to_private_project(user, project_id, plan):
     return serialize_project(project)
 
 
+def update_entity_in_private_project(user, project_id, entity_id, payload):
+    """Partially update one entity in a private Codex project."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('entity must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        entity = project.entities.get(pk=entity_id)
+    except Entity.DoesNotExist as exc:
+        raise CodexPlanError('Entity not found in this project.') from exc
+
+    update_fields = []
+    if 'name' in payload:
+        name = _text(payload.get('name'), 'entity.name', required=True, maximum=100)
+        if project.entities.exclude(pk=entity.pk).filter(name=name).exists():
+            raise CodexPlanError(f'Entity name already exists in this project: {name}.')
+        entity.name = name
+        update_fields.append('name')
+    if 'description' in payload:
+        entity.description = _text(payload.get('description'), 'entity.description', maximum=10000)
+        update_fields.append('description')
+    if not update_fields:
+        raise CodexPlanError('Provide at least one of: name, description.')
+    entity.save(update_fields=update_fields)
+    return {
+        'id': entity.id,
+        'name': entity.name,
+        'description': entity.description,
+    }
+
+
+def upsert_entity_field_in_private_project(user, project_id, entity_id, payload):
+    """Create or update one named field on an entity in a private Codex project."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('field must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        entity = project.entities.get(pk=entity_id)
+    except Entity.DoesNotExist as exc:
+        raise CodexPlanError('Entity not found in this project.') from exc
+
+    name = _text(payload.get('name'), 'field.name', required=True, maximum=100)
+    field, created = Field.objects.get_or_create(entity=entity, name=name)
+    field.type = _choice(payload, 'type', Field.Type.values, field.type)
+    field.description = _text(payload.get('description'), 'field.description', maximum=10000)
+    field.nullable = _bool(payload, 'nullable', field.nullable)
+    field.unique = _bool(payload, 'unique', field.unique)
+    field.default = _scalar_text(payload.get('default'), 'field.default')
+    field.max_length = _max_length(payload.get('max_length'), 'field.max_length')
+    if created:
+        field.order = entity.fields.count() - 1
+    field.save()
+    return {
+        'id': field.id,
+        'entity_id': entity.id,
+        'name': field.name,
+        'type': field.type,
+        'description': field.description,
+        'nullable': field.nullable,
+        'unique': field.unique,
+        'default': field.default,
+        'max_length': field.max_length,
+    }
+
+
+def update_resource_in_private_project(user, project_id, entity_id, payload):
+    """Partially update the API resource belonging to one private project entity."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('resource must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        entity = project.entities.get(pk=entity_id)
+        resource = Resource.objects.get(entity=entity)
+    except (Entity.DoesNotExist, Resource.DoesNotExist) as exc:
+        raise CodexPlanError('Resource not found in this project.') from exc
+
+    update_fields = []
+    if 'path' in payload:
+        resource.path = _text(payload.get('path'), 'resource.path', required=True, maximum=100)
+        update_fields.append('path')
+    if 'operations' in payload:
+        resource.operations = _string_list(payload, 'operations', Resource.Operation.values)
+        update_fields.append('operations')
+    if 'filters' in payload:
+        resource.filters = _string_list(payload, 'filters')
+        update_fields.append('filters')
+    if 'ordering' in payload:
+        resource.ordering = _text(payload.get('ordering'), 'resource.ordering', maximum=100)
+        update_fields.append('ordering')
+    if not update_fields:
+        raise CodexPlanError('Provide at least one of: path, operations, filters, ordering.')
+    resource.save(update_fields=update_fields)
+    return {
+        'id': resource.id,
+        'entity_id': entity.id,
+        'path': resource.path,
+        'operations': resource.operations,
+        'filters': resource.filters,
+        'ordering': resource.ordering,
+    }
+
+
 def upsert_relations_to_private_project(user, project_id, payload):
     """Create or update relations on existing entities through the Codex API."""
     if not isinstance(payload, dict):

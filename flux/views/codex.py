@@ -14,6 +14,9 @@ from flux.codex_plans import (
     list_identities_for_user,
     list_private_project_plans_for_user,
     scaffold_private_project,
+    upsert_entity_field_in_private_project,
+    update_entity_in_private_project,
+    update_resource_in_private_project,
     update_document_in_private_project,
     update_milestone_status_in_private_project,
     update_task_status_in_private_project,
@@ -152,6 +155,54 @@ class CodexProjectPlanAppendView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(project, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectEntityUpdateView(APIView):
+    """Partially update one entity in a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, entity_id):
+        try:
+            entity = update_entity_in_private_project(
+                request.user, project_id, entity_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(entity)
+
+
+class CodexProjectEntityFieldUpsertView(APIView):
+    """Create or update one field on an entity in a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, project_id, entity_id):
+        try:
+            field = upsert_entity_field_in_private_project(
+                request.user, project_id, entity_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(field, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectResourceUpdateView(APIView):
+    """Partially update one entity's API resource in a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, entity_id):
+        try:
+            resource = update_resource_in_private_project(
+                request.user, project_id, entity_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(resource)
 
 
 class CodexProjectRelationsView(APIView):

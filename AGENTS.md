@@ -14,6 +14,20 @@ Flux is a live service.  When a user asks Codex to create or upload a Flux
 plan, Codex may upload it directly without an additional confirmation, using
 only the dedicated Codex API described here.
 
+## Flux is the source of truth for project design
+
+Keep the corresponding private Flux project current for every implementation
+change. This applies in every chat working in this repository, without the
+user needing to repeat the request. Update the actual Flux design entities,
+fields, relations, resources, roles, screens, and documents that are affected;
+updating only a narrative document is not sufficient. Before reporting a
+change as complete, read the Flux project back and verify that every affected
+design artifact reflects the implemented state. If the dedicated Codex API
+lacks a safe update operation, implement that operation in the Flux Codex API
+as part of the change and clearly report that a deployment is required before
+the live project can be synchronized. Never create duplicate design entities
+as a substitute for updating an existing one.
+
 - The live API base URL is supplied through `FLUX_CODEX_API_BASE_URL` and must
   end in `/api/flux/codex`.
 - The user token is supplied only through `FLUX_CODEX_TOKEN`.  Send it as

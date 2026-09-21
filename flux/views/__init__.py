@@ -3,6 +3,9 @@
 from .codex import (
     CodexIdentityListView,
     CodexProjectDocumentUpdateView,
+    CodexProjectEntityUpdateView,
+    CodexProjectEntityFieldUpsertView,
+    CodexProjectResourceUpdateView,
     CodexProjectPlanAppendView,
     CodexProjectRelationsView,
     CodexProjectPlanDetailView,
@@ -35,6 +38,9 @@ from .updates import UpdateViewSet
 __all__ = [
     "CodexIdentityListView",
     "CodexProjectDocumentUpdateView",
+    "CodexProjectEntityUpdateView",
+    "CodexProjectEntityFieldUpsertView",
+    "CodexProjectResourceUpdateView",
     "CodexProjectPlanAppendView",
     "CodexProjectRelationsView",
     "CodexProjectPlanDetailView",

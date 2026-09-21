@@ -26,24 +26,49 @@ def types_file(spec):
     naming = spec["stack"]["api_naming"]
     blocks = []
     for entity in spec["entities"]:
-        lines = [f"export type {pascal(entity['name'])} = {{", "  id: number;"]
+        entity_name = pascal(entity["name"])
+        lines = [f"export type {entity_name} = {{", "  id: number;"]
         for field in entity["fields"]:
             ts_type = _TYPES[field["type"]]
             if field["nullable"] and ts_type != "unknown":
                 ts_type += " | null"
             lines.append(f"  {api_name(field['name'], naming)}: {ts_type};")
         for relation in entity["relations"]:
-            ts_type = "number[]" if relation["kind"] == "m2m" else "number"
-            if relation["kind"] != "m2m" and (relation["nullable"] or relation["on_delete"] == "set_null"):
+            target = pascal(relation["target"])
+            ts_type = f'{target}["id"][]' if relation["kind"] == "m2m" else f'{target}["id"]'
+            if relation["kind"] != "m2m" and relation["nullable"]:
                 ts_type += " | null"
             lines.append(f"  {api_name(relation['name'], naming)}: {ts_type};")
-        lines.append("}")
+        lines += [
+            "}",
+            "",
+            f'export type {entity_name}Create = Omit<{entity_name}, "id">;',
+            f"export type {entity_name}Update = Partial<{entity_name}Create>;",
+        ]
         blocks.append("\n".join(lines))
+    for resource in spec["resources"]:
+        if not resource.get("filters"):
+            continue
+        entity_name = pascal(resource["entity"])
+        filter_lines = [f"export type {entity_name}Filters = {{"]
+        filter_lines.extend(f"  {name}?: string;" for name in resource.get("filters", []))
+        filter_lines.append("}")
+        blocks.append("\n".join(filter_lines))
     return "\n\n".join(blocks) + "\n"
 
 
 def api_file(spec):
-    names = sorted({pascal(resource["entity"]) for resource in spec["resources"]})
+    resources = spec["resources"]
+    type_names = {pascal(resource["entity"]) for resource in resources}
+    for resource in resources:
+        entity = pascal(resource["entity"])
+        if resource.get("filters"):
+            type_names.add(f"{entity}Filters")
+        if "create" in resource["operations"]:
+            type_names.add(f"{entity}Create")
+        if "update" in resource["operations"]:
+            type_names.add(f"{entity}Update")
+    names = sorted(type_names)
     auth = spec["stack"]["auth_method"]
     lines = [
         f"import type {{ {', '.join(names)} }} from './types';",
@@ -90,22 +115,40 @@ def api_file(spec):
         "  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);",
         "}",
     ]
-    for resource in spec["resources"]:
+    if any(resource.get("filters") for resource in resources):
+        lines += [
+            "",
+            "function withQuery(path: string, filters: Record<string, string | undefined>): string {",
+            "  const params = new URLSearchParams();",
+            "  for (const [key, value] of Object.entries(filters)) {",
+            "    if (value !== undefined) params.set(key, value);",
+            "  }",
+            "  const query = params.toString();",
+            "  return query ? `${path}?${query}` : path;",
+            "}",
+        ]
+    for resource in resources:
         name = pascal(resource["entity"])
         path, operations = resource["path"].strip("/"), resource["operations"]
         members = []
         if "list" in operations:
-            members.append(f'  list: () => request<{name}[]>("/{path}/"),')
+            if resource.get("filters"):
+                members.append(
+                    f'  list: (filters: {name}Filters = {{}}) =>\n'
+                    f'    request<{name}[]>(withQuery("/{path}/", filters)),'
+                )
+            else:
+                members.append(f'  list: () => request<{name}[]>("/{path}/"),')
         if "retrieve" in operations:
             members.append(f'  retrieve: (id: number) => request<{name}>(`/{path}/${{id}}/`),')
         if "create" in operations:
             members.append(
-                f'  create: (data: Omit<{name}, "id">) =>\n'
+                f'  create: (data: {name}Create) =>\n'
                 f'    request<{name}>("/{path}/", {{ method: "POST", body: JSON.stringify(data) }}),'
             )
         if "update" in operations:
             members.append(
-                f'  update: (id: number, data: Partial<Omit<{name}, "id">>) =>\n'
+                f'  update: (id: number, data: {name}Update) =>\n'
                 f'    request<{name}>(`/{path}/${{id}}/`, {{ method: "PATCH", body: JSON.stringify(data) }}),'
             )
         if "delete" in operations:

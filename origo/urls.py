@@ -23,6 +23,7 @@ urlpatterns = [
     path('admin/', site.urls),
     path('api/accounts/', include('accounts.urls')),
     path('api/flux/', include('flux.urls')),
+    path('api/opus/', include('opus.urls')),
     path('api/verso/', include('verso.urls')),
     path('api/apsis/', include('apsis.urls')),
     path('api/tempus/', include('tempus.urls')),

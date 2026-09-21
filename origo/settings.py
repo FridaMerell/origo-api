@@ -119,6 +119,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "accounts",
     "flux",
+    "opus",
     "verso",
     "apsis",
     "tempus",
