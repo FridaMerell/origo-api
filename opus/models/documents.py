@@ -3,23 +3,23 @@
 from django.conf import settings
 from django.db import models
 
-from .planning import Edition, TextUnit
+from .planning import Edition, TextUnit, Work
 
 
 class ReadingProgress(models.Model):
-    """The latest reading position for a user in an edition."""
+    """The latest logical reading position for a user in a work."""
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="opus_reading_progress")
-    version = models.ForeignKey(Edition, on_delete=models.CASCADE, related_name="reading_progress")
-    unit = models.ForeignKey(TextUnit, on_delete=models.CASCADE, related_name="reading_progress")
-    offset = models.PositiveIntegerField(null=True, blank=True)
+    work = models.ForeignKey(Work, on_delete=models.CASCADE, related_name="reading_progress")
+    position = models.PositiveIntegerField(default=0)
+    character_index = models.PositiveIntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-updated_at", "id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "version"], name="opus_reading_progress_per_user_version"
+                fields=["user", "work"], name="opus_reading_progress_per_user_work"
             )
         ]
 

@@ -1007,6 +1007,7 @@ def upsert_relations_to_private_project(user, project_id, payload):
 
     with transaction.atomic():
         entities = {entity.name: entity for entity in project.entities.all()}
+        updated_count = 0
         for item in remove_payloads:
             source_name = _text(item.get('source_ref'), 'remove_relations.source_ref', required=True)
             relation_name = _text(item.get('name'), 'remove_relations.name', required=True)

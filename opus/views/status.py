@@ -19,6 +19,12 @@ class ReadingStatusView(APIView):
         work_id = request.query_params.get("work")
         if work_id:
             editions = editions.filter(work_id=work_id)
+        progress_by_work = {
+            progress.work_id: progress
+            for progress in ReadingProgress.objects.filter(
+                user=request.user, work_id__in=editions.values_list("work_id", flat=True)
+            )
+        }
         editions = (
             editions
             .annotate(
@@ -26,11 +32,6 @@ class ReadingStatusView(APIView):
                 max_unit_position=Max("text_units__position"),
             )
             .prefetch_related(
-                Prefetch(
-                    "reading_progress",
-                    queryset=ReadingProgress.objects.filter(user=request.user).select_related("unit"),
-                    to_attr="request_reading_progress",
-                ),
                 Prefetch(
                     "text_units",
                     queryset=(
@@ -52,16 +53,15 @@ class ReadingStatusView(APIView):
             )
             .order_by("work__title", "title", "id")
         )
-        rows = [self._row(edition) for edition in editions]
+        rows = [self._row(edition, progress_by_work.get(edition.work_id)) for edition in editions]
         return Response({"count": len(rows), "results": rows})
 
     @staticmethod
-    def _row(edition):
-        progress = edition.request_reading_progress[0] if edition.request_reading_progress else None
+    def _row(edition, progress):
         if progress is None or not edition.max_unit_position:
             percent = 0
         else:
-            percent = round((progress.unit.position / edition.max_unit_position) * 100)
+            percent = round((progress.position / edition.max_unit_position) * 100)
             percent = max(0, min(100, percent))
 
         text_units = getattr(edition, "request_text_units", [])
@@ -69,7 +69,7 @@ class ReadingStatusView(APIView):
             unit
             for unit in text_units
             if unit.kind == TextUnit.Kind.PARAGRAPH
-            and (not progress or unit.position >= progress.unit.position)
+            and (not progress or unit.position >= progress.position)
         ][:3]
         if not paragraphs:
             paragraphs = list(text_units[:3])
@@ -82,7 +82,8 @@ class ReadingStatusView(APIView):
             "language": edition.language,
             "status": f"{percent}%",
             "status_percent": percent,
-            "current_unit_id": progress.unit_id if progress else None,
+            "current_position": progress.position if progress else 0,
+            "character_index": progress.character_index if progress else None,
             "updated_at": progress.updated_at if progress else None,
             "units": [
                 {
