@@ -3,6 +3,10 @@ from opus.models import (
     Alignment,
     AlignmentSet,
     Annotation,
+    Author,
+    AuthorAlias,
+    AuthorIdentifier,
+    BibliographyEntry,
     Bookmark,
     Excerpt,
     LexicalEntry,
@@ -12,6 +16,7 @@ from opus.models import (
     TextUnit,
     Edition,
     Work,
+    WorkContributor,
 )
 
 
@@ -20,6 +25,10 @@ site.register(
         Alignment,
         AlignmentSet,
         Annotation,
+        Author,
+        AuthorAlias,
+        AuthorIdentifier,
+        BibliographyEntry,
         Bookmark,
         Excerpt,
         LexicalEntry,
@@ -29,5 +38,6 @@ site.register(
         TextUnit,
         Edition,
         Work,
+        WorkContributor,
     ]
 )

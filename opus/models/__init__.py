@@ -2,8 +2,10 @@
 
 from .alignment import Alignment, AlignmentGroup, AlignmentMember, AlignmentSet, AlignmentVersion
 from .annotations import Annotation
+from .bibliography import BibliographyEntry
 from .documents import Bookmark, Excerpt, ReadingProgress
 from .lexicon import LexicalEntry
+from .people import Author, AuthorAlias, AuthorIdentifier, WorkContributor
 from .planning import Edition, Shelf, SourceFile, TextUnit, Work
 
 __all__ = [
@@ -13,6 +15,10 @@ __all__ = [
     "AlignmentSet",
     "AlignmentVersion",
     "Annotation",
+    "Author",
+    "AuthorAlias",
+    "AuthorIdentifier",
+    "BibliographyEntry",
     "Bookmark",
     "Excerpt",
     "LexicalEntry",
@@ -22,4 +28,5 @@ __all__ = [
     "TextUnit",
     "Edition",
     "Work",
+    "WorkContributor",
 ]

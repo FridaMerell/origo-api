@@ -3,7 +3,7 @@ from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from opus.models import Edition, ReadingProgress, TextUnit
+from opus.models import Annotation, Edition, ReadingProgress, TextUnit
 from opus.access import visible_to_user
 
 
@@ -30,7 +30,25 @@ class ReadingStatusView(APIView):
                     "reading_progress",
                     queryset=ReadingProgress.objects.filter(user=request.user).select_related("unit"),
                     to_attr="request_reading_progress",
-                )
+                ),
+                Prefetch(
+                    "text_units",
+                    queryset=(
+                        TextUnit.objects.order_by("position", "id")
+                        .prefetch_related(
+                            Prefetch(
+                                "annotations",
+                                queryset=(
+                                    Annotation.objects.filter(user=request.user)
+                                    .select_related("lexical_entry")
+                                    .order_by("start_offset", "id")
+                                ),
+                                to_attr="request_annotations",
+                            )
+                        )
+                    ),
+                    to_attr="request_text_units",
+                ),
             )
             .order_by("work__title", "title", "id")
         )
@@ -46,19 +64,15 @@ class ReadingStatusView(APIView):
             percent = round((progress.unit.position / edition.max_unit_position) * 100)
             percent = max(0, min(100, percent))
 
-        paragraphs = list(
-            TextUnit.objects.filter(
-                version=edition,
-                kind=TextUnit.Kind.PARAGRAPH,
-                position__gte=progress.unit.position if progress else 0,
-            )
-            .order_by("position", "id")[:3]
-        )
+        text_units = getattr(edition, "request_text_units", [])
+        paragraphs = [
+            unit
+            for unit in text_units
+            if unit.kind == TextUnit.Kind.PARAGRAPH
+            and (not progress or unit.position >= progress.unit.position)
+        ][:3]
         if not paragraphs:
-            paragraphs = list(
-                TextUnit.objects.filter(version=edition)
-                .order_by("position", "id")[:3]
-            )
+            paragraphs = list(text_units[:3])
 
         return {
             "id": edition.id,
@@ -77,6 +91,28 @@ class ReadingStatusView(APIView):
                     "position": unit.position,
                     "label": unit.label,
                     "content": unit.content,
+                    "annotations": [
+                        {
+                            "id": annotation.id,
+                            "kind": annotation.kind,
+                            "start_offset": annotation.start_offset,
+                            "end_offset": annotation.end_offset,
+                            "body": annotation.body,
+                            "lexical_entry": (
+                                {
+                                    "id": annotation.lexical_entry.id,
+                                    "lemma": annotation.lexical_entry.lemma,
+                                    "language": annotation.lexical_entry.language,
+                                    "part_of_speech": annotation.lexical_entry.part_of_speech,
+                                    "gender": annotation.lexical_entry.gender,
+                                    "inflection_data": annotation.lexical_entry.inflection_data,
+                                }
+                                if annotation.lexical_entry_id
+                                else None
+                            ),
+                        }
+                        for annotation in getattr(unit, "request_annotations", [])
+                    ],
                 }
                 for unit in paragraphs
             ],

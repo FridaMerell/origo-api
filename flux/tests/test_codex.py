@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
 from accounts.models import CodexToken
-from flux.models import Project, Task
+from flux.models import Entity, Project, Resource, Role, RolePermission, Task
 
 User = get_user_model()
 
@@ -132,6 +132,55 @@ class CodexProjectPlanTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_update_role_replaces_its_permissions(self):
+        created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data
+        project = Project.objects.get(pk=created['id'])
+        entity = Entity.objects.create(project=project, name='Work')
+        resource = Resource.objects.create(entity=entity, path='works')
+        role = Role.objects.create(project=project, name='Reader')
+        RolePermission.objects.create(
+            role=role,
+            resource=resource,
+            operation=Resource.Operation.LIST,
+            scope=RolePermission.Scope.ALL,
+        )
+
+        response = self.client.patch(
+            f'/api/flux/codex/projects/{project.id}/roles/{role.id}/',
+            {
+                'description': 'Can manage shared works.',
+                'permissions': [
+                    {'resource_id': resource.id, 'operation': 'create', 'scope': 'all'},
+                    {'resource_id': resource.id, 'operation': 'update', 'scope': 'all'},
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Reader')
+        self.assertEqual(
+            response.data['permissions'],
+            [
+                {'resource_id': resource.id, 'operation': 'create', 'scope': 'all'},
+                {'resource_id': resource.id, 'operation': 'update', 'scope': 'all'},
+            ],
+        )
+
+    def test_resource_update_creates_a_missing_resource(self):
+        created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data
+        project = Project.objects.get(pk=created['id'])
+        entity = Entity.objects.create(project=project, name='Edition')
+
+        response = self.client.patch(
+            f'/api/flux/codex/projects/{project.id}/entities/{entity.id}/resource/',
+            {'path': 'editions', 'operations': ['list', 'retrieve', 'create', 'update', 'delete']},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['path'], 'editions')
 
     def test_update_document_rejects_a_milestone_from_another_project(self):
         created = self.client.post('/api/flux/codex/projects/', {'name': 'Plan'}, format='json').data

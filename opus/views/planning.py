@@ -1,13 +1,14 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser
 from rest_framework.response import Response
 
 from opus.models import Edition, Shelf, SourceFile, TextUnit, Work
 from opus.access import visible_to_user
 from opus.serializers import (
     DocumentUploadSerializer,
+    CreateWorkWithEditionsSerializer,
     SourceFileSerializer,
     ShelfSerializer,
     TextUnitSerializer,
@@ -16,7 +17,7 @@ from opus.serializers import (
 )
 from opus.services.importing import DocumentImportError, import_document
 from opus.services.importing import MAX_FILE_SIZE
-from opus.uploads import MemoryOnlyUploadHandler
+from opus.uploads import MemoryOnlyMultiPartParser
 
 
 class WorkViewSet(viewsets.ModelViewSet):
@@ -25,17 +26,31 @@ class WorkViewSet(viewsets.ModelViewSet):
     filterset_fields = {
         "owner": ["exact"],
         "is_private": ["exact"],
-        "author": ["exact", "icontains"],
         "year": ["exact", "icontains"],
         "shelves": ["exact"],
         "title": ["exact", "icontains"],
     }
 
     def get_queryset(self):
-        return visible_to_user(Work.objects.all(), self.request.user)
+        return visible_to_user(
+            Work.objects.prefetch_related(
+                "contributors__author", "editions", "shelves"
+            ),
+            self.request.user,
+        )
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="create-with-editions")
+    def create_with_editions(self, request):
+        serializer = CreateWorkWithEditionsSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        work = serializer.save()
+        return Response(WorkSerializer(work, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
 class ShelfViewSet(viewsets.ModelViewSet):
@@ -61,7 +76,7 @@ class EditionViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="import-document",
-        parser_classes=[MultiPartParser, FormParser],
+        parser_classes=[MemoryOnlyMultiPartParser, FormParser],
         permission_classes=[permissions.IsAuthenticated],
     )
     def import_document(self, request, pk=None):
@@ -74,9 +89,6 @@ class EditionViewSet(viewsets.ModelViewSet):
             return self._import_error("invalid_upload", "The request has an invalid content length.")
         if request_size > MAX_FILE_SIZE + 1024 * 1024:
             return self._import_error("file_too_large", "The document must be at most 10 MB.")
-        request._request.upload_handlers = [
-            MemoryOnlyUploadHandler(request._request, max_file_size=MAX_FILE_SIZE)
-        ]
         try:
             payload = DocumentUploadSerializer(data=request.data)
         except ParseError:

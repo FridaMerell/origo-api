@@ -50,3 +50,27 @@ class Milestone(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class CodexIdempotencyRequest(models.Model):
+    """Completed Codex writes that may safely be replayed after a retry."""
+
+    token = models.ForeignKey(
+        'accounts.CodexToken',
+        on_delete=models.CASCADE,
+        related_name='flux_idempotency_requests',
+    )
+    key = models.CharField(max_length=128)
+    request_hash = models.CharField(max_length=64)
+    response_status = models.PositiveSmallIntegerField()
+    response_data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['token', 'key'],
+                name='flux_codex_idempotency_token_key_unique',
+            ),
+        ]
+        indexes = [models.Index(fields=['created_at'])]
