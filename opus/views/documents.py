@@ -9,11 +9,11 @@ from opus.serializers import BookmarkSerializer, ExcerptSerializer, ReadingProgr
 class ReadingProgressViewSet(viewsets.ModelViewSet):
     serializer_class = ReadingProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = {"user": ["exact"], "version": ["exact"], "unit": ["exact"]}
+    filterset_fields = {"user": ["exact"], "work": ["exact"], "position": ["exact", "gte", "lte"]}
 
     def get_queryset(self):
         return visible_to_user(
-            ReadingProgress.objects.select_related("version__work"), self.request.user, "version__work__"
+            ReadingProgress.objects.select_related("work"), self.request.user, "work__"
         )
 
     def create(self, request, *args, **kwargs):
@@ -21,10 +21,10 @@ class ReadingProgressViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         progress, created = ReadingProgress.objects.update_or_create(
             user=request.user,
-            version=serializer.validated_data["version"],
+            work=serializer.validated_data["work"],
             defaults={
-                "unit": serializer.validated_data["unit"],
-                "offset": serializer.validated_data.get("offset"),
+                "position": serializer.validated_data.get("position", 0),
+                "character_index": serializer.validated_data.get("character_index"),
             },
         )
         response_serializer = self.get_serializer(progress)
