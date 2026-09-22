@@ -10,8 +10,22 @@ from .alignment import (
 from .annotations import AnnotationSerializer
 from .documents import BookmarkSerializer, ExcerptSerializer, ReadingProgressSerializer
 from .lexicon import LexicalEntrySerializer
+from .people import (
+    AuthorAliasSerializer,
+    AuthorIdentifierSerializer,
+    AuthorSerializer,
+    BibliographyEntrySerializer,
+    WorkContributorSerializer,
+)
 from .imports import DocumentUploadSerializer
-from .planning import EditionSerializer, ShelfSerializer, SourceFileSerializer, TextUnitSerializer, WorkSerializer
+from .planning import (
+    CreateWorkWithEditionsSerializer,
+    EditionSerializer,
+    ShelfSerializer,
+    SourceFileSerializer,
+    TextUnitSerializer,
+    WorkSerializer,
+)
 
 __all__ = [
     "AlignmentSerializer",
@@ -20,6 +34,10 @@ __all__ = [
     "AlignmentSetSerializer",
     "AlignmentVersionSerializer",
     "AnnotationSerializer",
+    "AuthorSerializer",
+    "AuthorAliasSerializer",
+    "AuthorIdentifierSerializer",
+    "BibliographyEntrySerializer",
     "BookmarkSerializer",
     "ExcerptSerializer",
     "DocumentUploadSerializer",
@@ -30,4 +48,6 @@ __all__ = [
     "TextUnitSerializer",
     "EditionSerializer",
     "WorkSerializer",
+    "CreateWorkWithEditionsSerializer",
+    "WorkContributorSerializer",
 ]

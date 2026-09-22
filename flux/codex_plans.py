@@ -752,7 +752,7 @@ def scaffold_private_project(user, project_id, target):
         raise CodexPlanError(str(exc)) from exc
 
 
-def import_project_plan_for_user(user, plan):
+def import_project_plan_for_user(user, plan, *, return_project=False):
     if not isinstance(plan, dict):
         raise CodexPlanError('plan must be an object.')
     updated_count = 0
@@ -763,7 +763,7 @@ def import_project_plan_for_user(user, plan):
         )
         project.members.add(user)
         _append_plan_to_project(project, user, plan)
-    return serialize_project(project)
+    return project if return_project else serialize_project(project)
 
 
 def list_private_project_plans_for_user(user):
@@ -781,7 +781,7 @@ def get_private_project_plan_for_user(user, project_id):
     return serialize_project(project)
 
 
-def append_plan_to_private_project(user, project_id, plan):
+def append_plan_to_private_project(user, project_id, plan, *, return_project=False):
     """Add a complete plan fragment to an existing private Codex project."""
     try:
         project = _private_projects_for(user).get(pk=project_id)
@@ -789,7 +789,7 @@ def append_plan_to_private_project(user, project_id, plan):
         raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
     with transaction.atomic():
         _append_plan_to_project(project, user, plan)
-    return serialize_project(project)
+    return project if return_project else serialize_project(project)
 
 
 def update_entity_in_private_project(user, project_id, entity_id, payload):
@@ -862,6 +862,18 @@ def upsert_entity_field_in_private_project(user, project_id, entity_id, payload)
     }
 
 
+def delete_entity_field_in_private_project(user, project_id, entity_id, field_id):
+    """Delete one field from an entity in a private Codex project."""
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+        entity = project.entities.get(pk=entity_id)
+        field = entity.fields.get(pk=field_id)
+    except (Project.DoesNotExist, Entity.DoesNotExist, Field.DoesNotExist) as exc:
+        raise CodexPlanError('Field not found in this private project entity.') from exc
+    field.delete()
+    return {'id': field_id, 'entity_id': entity_id, 'deleted': True}
+
+
 def update_resource_in_private_project(user, project_id, entity_id, payload):
     """Partially update the API resource belonging to one private project entity."""
     if not isinstance(payload, dict):
@@ -872,9 +884,14 @@ def update_resource_in_private_project(user, project_id, entity_id, payload):
         raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
     try:
         entity = project.entities.get(pk=entity_id)
+    except Entity.DoesNotExist as exc:
+        raise CodexPlanError('Entity not found in this project.') from exc
+    try:
         resource = Resource.objects.get(entity=entity)
-    except (Entity.DoesNotExist, Resource.DoesNotExist) as exc:
-        raise CodexPlanError('Resource not found in this project.') from exc
+    except Resource.DoesNotExist:
+        if 'path' not in payload or 'operations' not in payload:
+            raise CodexPlanError('A new resource requires path and operations.')
+        resource = Resource(entity=entity)
 
     update_fields = []
     if 'path' in payload:
@@ -891,7 +908,10 @@ def update_resource_in_private_project(user, project_id, entity_id, payload):
         update_fields.append('ordering')
     if not update_fields:
         raise CodexPlanError('Provide at least one of: path, operations, filters, ordering.')
-    resource.save(update_fields=update_fields)
+    if resource.pk is None:
+        resource.save()
+    else:
+        resource.save(update_fields=update_fields)
     return {
         'id': resource.id,
         'entity_id': entity.id,
@@ -899,6 +919,78 @@ def update_resource_in_private_project(user, project_id, entity_id, payload):
         'operations': resource.operations,
         'filters': resource.filters,
         'ordering': resource.ordering,
+    }
+
+
+def update_role_in_private_project(user, project_id, role_id, payload):
+    """Partially update one role and, when supplied, replace its permissions."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('role must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+        role = project.roles.get(pk=role_id)
+    except (Project.DoesNotExist, Role.DoesNotExist) as exc:
+        raise CodexPlanError('Role not found in this private project.') from exc
+
+    update_fields = []
+    if 'name' in payload:
+        name = _text(payload.get('name'), 'role.name', required=True, maximum=100)
+        if project.roles.exclude(pk=role.pk).filter(name=name).exists():
+            raise CodexPlanError(f'Role name already exists in this project: {name}.')
+        role.name = name
+        update_fields.append('name')
+    if 'description' in payload:
+        role.description = _text(payload.get('description'), 'role.description', maximum=10000)
+        update_fields.append('description')
+
+    replace_permissions = 'permissions' in payload
+    permissions = []
+    if replace_permissions:
+        permission_payloads = _items(payload, 'permissions')
+        resources = {
+            resource.id: resource
+            for resource in Resource.objects.filter(entity__project=project)
+        }
+        seen = set()
+        for item in permission_payloads:
+            resource_id = _optional_id(item.get('resource_id'), 'permission.resource_id')
+            if resource_id not in resources:
+                raise CodexPlanError('Permission resource is not in this project.')
+            operation = _choice(item, 'operation', Resource.Operation.values, None)
+            scope = _choice(item, 'scope', RolePermission.Scope.values, RolePermission.Scope.ALL)
+            key = (resource_id, operation)
+            if key in seen:
+                raise CodexPlanError('A role may grant each resource operation only once.')
+            seen.add(key)
+            permissions.append(
+                RolePermission(
+                    role=role,
+                    resource=resources[resource_id],
+                    operation=operation,
+                    scope=scope,
+                )
+            )
+
+    if not update_fields and not replace_permissions:
+        raise CodexPlanError('Provide at least one of: name, description, permissions.')
+    with transaction.atomic():
+        if update_fields:
+            role.save(update_fields=update_fields)
+        if replace_permissions:
+            role.permissions.all().delete()
+            RolePermission.objects.bulk_create(permissions)
+    return {
+        'id': role.id,
+        'name': role.name,
+        'description': role.description,
+        'permissions': [
+            {
+                'resource_id': permission.resource_id,
+                'operation': permission.operation,
+                'scope': permission.scope,
+            }
+            for permission in role.permissions.order_by('id')
+        ],
     }
 
 
@@ -1017,7 +1109,7 @@ def update_document_in_private_project(user, project_id, document_id, payload):
     }
 
 
-def add_task_to_private_project(user, project_id, task_data):
+def add_task_to_private_project(user, project_id, task_data, *, return_task=False):
     """Create one task in an existing private project owned by the user."""
     if not isinstance(task_data, dict):
         raise CodexPlanError('task must be an object.')
@@ -1051,6 +1143,8 @@ def add_task_to_private_project(user, project_id, task_data):
         priority=_choice(task_data, 'priority', Task.Priority.values, Task.Priority.MEDIUM),
         status=_choice(task_data, 'status', Task.Status.values, Task.Status.NOT_STARTED),
     )
+    if return_task:
+        return task
     return {
         'id': task.id,
         'project_id': project.id,

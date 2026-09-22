@@ -1,15 +1,20 @@
 from rest_framework import serializers
 
 from opus.access import can_access_work
-from opus.models import Edition, Shelf, SourceFile, TextUnit, Work
+from opus.models import Author, Edition, Shelf, SourceFile, TextUnit, Work, WorkContributor
+from opus.serializers.people import WorkContributorSerializer
 
 
 class WorkSerializer(serializers.ModelSerializer):
+    contributors = WorkContributorSerializer(many=True, read_only=True)
+    editions = serializers.SerializerMethodField()
+    shelf_names = serializers.SerializerMethodField()
+
     class Meta:
         model = Work
         fields = [
-            "id", "title", "author", "year", "owner", "is_private", "shelves",
-            "created_at", "updated_at",
+            "id", "title", "year", "owner", "is_private", "shelves",
+            "contributors", "editions", "shelf_names", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "owner", "created_at", "updated_at"]
 
@@ -22,6 +27,64 @@ class WorkSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Only the work owner can change its privacy.")
         return value
 
+    def get_editions(self, obj):
+        return EditionSerializer(
+            obj.editions.all(), many=True, context=self.context
+        ).data
+
+    def get_shelf_names(self, obj):
+        return [shelf.name for shelf in obj.shelves.all()]
+
+
+class CreateWorkEditionSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    language = serializers.CharField(max_length=16)
+    edition = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    source = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+
+class CreateWorkWithEditionsSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    year = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    is_private = serializers.BooleanField(required=False, default=False)
+    shelves = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Shelf.objects.all(), required=False
+    )
+    author = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    editions = CreateWorkEditionSerializer(many=True)
+
+    def validate_editions(self, editions):
+        if not editions:
+            raise serializers.ValidationError("At least one edition is required.")
+        return editions
+
+    def create(self, validated_data):
+        editions = validated_data.pop("editions")
+        author_name = validated_data.pop("author", "").strip()
+        shelves = validated_data.pop("shelves", [])
+        owner = self.context["request"].user
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            work = Work.objects.create(owner=owner, **validated_data)
+            work.shelves.set(shelves)
+
+            if author_name:
+                author = Author.objects.filter(name__iexact=author_name).first()
+                if author is None:
+                    author = Author.objects.create(name=author_name)
+                WorkContributor.objects.create(
+                    work=work,
+                    author=author,
+                    role=WorkContributor.Role.AUTHOR,
+                    display_order=0,
+                )
+
+            Edition.objects.bulk_create(
+                [Edition(work=work, **edition) for edition in editions]
+            )
+        return work
 
 class ShelfSerializer(serializers.ModelSerializer):
     class Meta:

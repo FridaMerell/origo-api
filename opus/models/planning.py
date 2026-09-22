@@ -8,7 +8,6 @@ class Work(models.Model):
     """The abstract literary work, independent of a particular edition."""
 
     title = models.CharField(max_length=255)
-    author = models.CharField(max_length=255, blank=True)
     year = models.CharField(max_length=100, blank=True)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="opus_works"

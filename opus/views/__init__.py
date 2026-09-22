@@ -10,6 +10,13 @@ from .alignment import (
 from .annotations import AnnotationViewSet
 from .documents import BookmarkViewSet, ExcerptViewSet, ReadingProgressViewSet
 from .lexicon import LexicalEntryViewSet
+from .people import (
+    AuthorAliasViewSet,
+    AuthorIdentifierViewSet,
+    AuthorViewSet,
+    BibliographyEntryViewSet,
+    WorkContributorViewSet,
+)
 from .planning import EditionViewSet, ShelfViewSet, SourceFileViewSet, TextUnitViewSet, WorkViewSet
 from .status import ReadingStatusView
 
@@ -20,6 +27,10 @@ __all__ = [
     "AlignmentGroupViewSet",
     "AlignmentMemberViewSet",
     "AnnotationViewSet",
+    "AuthorViewSet",
+    "AuthorAliasViewSet",
+    "AuthorIdentifierViewSet",
+    "BibliographyEntryViewSet",
     "BookmarkViewSet",
     "ExcerptViewSet",
     "LexicalEntryViewSet",
@@ -29,5 +40,6 @@ __all__ = [
     "TextUnitViewSet",
     "EditionViewSet",
     "WorkViewSet",
+    "WorkContributorViewSet",
     "ReadingStatusView",
 ]
