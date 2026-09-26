@@ -1,32 +1,37 @@
 from django.db.models import Count, Max, Prefetch
+from django.http import Http404
 from rest_framework import permissions
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from opus.models import Annotation, Edition, ReadingProgress, TextUnit
+from opus.models import Annotation, Edition, ReadingProgress, TextUnit, Work
 from opus.access import visible_to_user
+from opus.serializers import ReadingProgressSerializer
 
 
-class ReadingStatusView(APIView):
-    """Return every edition with a three-paragraph reading window."""
+def get_visible_work_or_404(user, work_id):
+    try:
+        return visible_to_user(Work.objects.all(), user).get(pk=work_id)
+    except Work.DoesNotExist as exc:
+        raise Http404 from exc
+
+
+class ReadingView(APIView):
+    """Return one work's editions with a shared three-paragraph reading window."""
 
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
-        editions = visible_to_user(
-            Edition.objects.select_related("work"), request.user, "work__"
-        )
-        work_id = request.query_params.get("work")
-        if work_id:
-            editions = editions.filter(work_id=work_id)
-        progress_by_work = {
-            progress.work_id: progress
-            for progress in ReadingProgress.objects.filter(
-                user=request.user, work_id__in=editions.values_list("work_id", flat=True)
-            )
-        }
+    def get(self, request, work_id):
+        work = get_visible_work_or_404(request.user, work_id)
+
+        progress = ReadingProgress.objects.filter(user=request.user, work=work).first()
+        paragraph_queryset = TextUnit.objects.filter(kind=TextUnit.Kind.PARAGRAPH).select_related("parent")
+        if progress is not None:
+            paragraph_queryset = paragraph_queryset.filter(position__gte=progress.position)
+        paragraph_queryset = paragraph_queryset.order_by("position", "id")[:3]
         editions = (
-            editions
+            Edition.objects.filter(work=work)
             .annotate(
                 unit_count=Count("text_units", distinct=True),
                 max_unit_position=Max("text_units__position"),
@@ -35,8 +40,7 @@ class ReadingStatusView(APIView):
                 Prefetch(
                     "text_units",
                     queryset=(
-                        TextUnit.objects.order_by("position", "id")
-                        .prefetch_related(
+                        paragraph_queryset.prefetch_related(
                             Prefetch(
                                 "annotations",
                                 queryset=(
@@ -48,13 +52,27 @@ class ReadingStatusView(APIView):
                             )
                         )
                     ),
-                    to_attr="request_text_units",
+                    to_attr="request_paragraphs",
+                ),
+                Prefetch(
+                    "text_units",
+                    queryset=TextUnit.objects.filter(
+                        kind=TextUnit.Kind.CHAPTER, parent__isnull=True
+                    ).order_by("position", "id"),
+                    to_attr="request_chapters",
                 ),
             )
-            .order_by("work__title", "title", "id")
+            .order_by("title", "id")
         )
-        rows = [self._row(edition, progress_by_work.get(edition.work_id)) for edition in editions]
-        return Response({"count": len(rows), "results": rows})
+        return Response(
+            {
+                "work": {"id": work.id, "title": work.title},
+                "position": progress.position if progress else 0,
+                "character_index": progress.character_index if progress else None,
+                "updated_at": progress.updated_at if progress else None,
+                "editions": [self._row(edition, progress) for edition in editions],
+            }
+        )
 
     @staticmethod
     def _row(edition, progress):
@@ -64,27 +82,23 @@ class ReadingStatusView(APIView):
             percent = round((progress.position / edition.max_unit_position) * 100)
             percent = max(0, min(100, percent))
 
-        text_units = getattr(edition, "request_text_units", [])
-        paragraphs = [
-            unit
-            for unit in text_units
-            if unit.kind == TextUnit.Kind.PARAGRAPH
-            and (not progress or unit.position >= progress.position)
-        ][:3]
-        if not paragraphs:
-            paragraphs = list(text_units[:3])
+        paragraphs = getattr(edition, "request_paragraphs", [])
+        chapters = getattr(edition, "request_chapters", [])
 
         return {
             "id": edition.id,
-            "work_id": edition.work_id,
-            "work_title": edition.work.title,
             "title": edition.title,
             "language": edition.language,
             "status": f"{percent}%",
             "status_percent": percent,
-            "current_position": progress.position if progress else 0,
-            "character_index": progress.character_index if progress else None,
-            "updated_at": progress.updated_at if progress else None,
+            "chapters": [
+                {
+                    "id": unit.id,
+                    "position": unit.position,
+                    "label": unit.label,
+                }
+                for unit in chapters
+            ],
             "units": [
                 {
                     "id": unit.id,
@@ -92,10 +106,20 @@ class ReadingStatusView(APIView):
                     "position": unit.position,
                     "label": unit.label,
                     "content": unit.content,
+                    "chapter": (
+                        {
+                            "id": unit.parent_id,
+                            "position": unit.parent.position,
+                            "label": unit.parent.label,
+                        }
+                        if unit.parent_id and unit.parent.kind == TextUnit.Kind.CHAPTER
+                        else None
+                    ),
                     "annotations": [
                         {
                             "id": annotation.id,
                             "kind": annotation.kind,
+                            "target_kind": annotation.target_kind,
                             "start_offset": annotation.start_offset,
                             "end_offset": annotation.end_offset,
                             "body": annotation.body,
@@ -118,3 +142,28 @@ class ReadingStatusView(APIView):
                 for unit in paragraphs
             ],
         }
+
+
+class WorkReadingProgressView(APIView):
+    """Replace the current user's reading position for one work."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def put(self, request, work_id):
+        work = get_visible_work_or_404(request.user, work_id)
+        if "position" not in request.data:
+            raise ValidationError({"position": ["This field is required."]})
+
+        payload = request.data.copy()
+        payload["work"] = work.pk
+        serializer = ReadingProgressSerializer(data=payload, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        progress, _ = ReadingProgress.objects.update_or_create(
+            user=request.user,
+            work=work,
+            defaults={
+                "position": serializer.validated_data["position"],
+                "character_index": serializer.validated_data.get("character_index"),
+            },
+        )
+        return Response(ReadingProgressSerializer(progress, context={"request": request}).data)

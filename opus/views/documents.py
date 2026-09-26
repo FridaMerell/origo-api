@@ -13,7 +13,9 @@ class ReadingProgressViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return visible_to_user(
-            ReadingProgress.objects.select_related("work"), self.request.user, "work__"
+            ReadingProgress.objects.filter(user=self.request.user).select_related("work"),
+            self.request.user,
+            "work__",
         )
 
     def create(self, request, *args, **kwargs):
@@ -45,7 +47,9 @@ class BookmarkViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return visible_to_user(
-            Bookmark.objects.select_related("version__work"), self.request.user, "version__work__"
+            Bookmark.objects.filter(user=self.request.user).select_related("version__work"),
+            self.request.user,
+            "version__work__",
         )
 
     def perform_create(self, serializer):
@@ -64,7 +68,9 @@ class ExcerptViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return visible_to_user(
-            Excerpt.objects.select_related("version__work"), self.request.user, "version__work__"
+            Excerpt.objects.filter(user=self.request.user).select_related("version__work"),
+            self.request.user,
+            "version__work__",
         )
 
     def perform_create(self, serializer):

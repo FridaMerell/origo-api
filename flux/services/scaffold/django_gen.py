@@ -3,7 +3,7 @@
 import json
 from decimal import Decimal, InvalidOperation
 
-from .common import app_label, pascal, snake
+from .common import api_projections_markdown, app_label, pascal, snake
 
 _FIELD_CLASSES = {
     "string": "CharField",
@@ -263,6 +263,8 @@ def generate(spec):
         ]
     if spec["roles"]:
         files.append({"path": f"{label}/permissions.py", "content": permissions_file(spec)})
+    if spec.get("api_projections"):
+        files.append({"path": "API_PROJECTIONS.md", "content": api_projections_markdown(spec)})
     for seed in spec["seeds"]:
         entity = next((e for e in spec["entities"] if e["name"] == seed["entity"]), None)
         if entity and seed["rows"]:

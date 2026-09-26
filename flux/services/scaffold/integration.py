@@ -10,7 +10,7 @@ import re
 
 MAX_SAMPLE_CHARACTERS = 200_000
 AUTH_TYPES = ["none", "api_key_header", "api_key_query", "bearer", "basic", "oauth_client"]
-METHODS = ["GET", "POST"]
+METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 BODY_FORMATS = ["json", "form"]
 PAGINATIONS = ["none", "offset", "page", "cursor"]
 PARAM_LOCATIONS = ["query", "path", "body", "header"]
@@ -169,8 +169,8 @@ def clean_params(value, method, body_format, path):
         location = _text(item.get("in"), "param.in", maximum=10) or "query"
         if location not in PARAM_LOCATIONS:
             raise ValueError(f"param.in must be one of: {', '.join(PARAM_LOCATIONS)}.")
-        if location == "body" and method != "POST":
-            raise ValueError("Body parameters need method POST.")
+        if location == "body" and method not in ("POST", "PUT", "PATCH"):
+            raise ValueError("Body parameters need method POST, PUT or PATCH.")
         type_name = _text(item.get("type"), "param.type", maximum=10) or "string"
         if type_name not in PARAM_TYPES:
             raise ValueError(f"param.type must be one of: {', '.join(PARAM_TYPES)}.")

@@ -10,8 +10,14 @@ from .planning import TextUnit
 class Annotation(models.Model):
     """A highlight, definition, or marginal note on a text interval."""
 
+    class TargetKind(models.TextChoices):
+        WORD = "word", "Word"
+        PHRASE = "phrase", "Phrase"
+        UNIT = "unit", "Whole text unit"
+
     start_offset = models.PositiveIntegerField(null=True, blank=True)
     end_offset = models.PositiveIntegerField(null=True, blank=True)
+    target_kind = models.CharField(max_length=20, choices=TargetKind.choices, default=TargetKind.UNIT)
     kind = models.CharField(max_length=20)
     body = models.TextField(blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="opus_annotations")

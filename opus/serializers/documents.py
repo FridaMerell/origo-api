@@ -1,7 +1,6 @@
 from rest_framework import serializers
 
 from opus.access import can_access_work
-from opus.access import can_access_work
 from opus.models import Bookmark, Excerpt, ReadingProgress
 
 
@@ -28,6 +27,13 @@ class BookmarkSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("You cannot use a private edition you do not own.")
         return version
 
+    def validate(self, attrs):
+        version = attrs.get("version", getattr(self.instance, "version", None))
+        unit = attrs.get("unit", getattr(self.instance, "unit", None))
+        if version is not None and unit is not None and unit.version_id != version.pk:
+            raise serializers.ValidationError({"unit": "Must belong to the selected edition."})
+        return attrs
+
 
 class ExcerptSerializer(serializers.ModelSerializer):
     class Meta:
@@ -42,3 +48,10 @@ class ExcerptSerializer(serializers.ModelSerializer):
         if not can_access_work(version.work, self.context["request"].user):
             raise serializers.ValidationError("You cannot use a private edition you do not own.")
         return version
+
+    def validate(self, attrs):
+        version = attrs.get("version", getattr(self.instance, "version", None))
+        unit = attrs.get("unit", getattr(self.instance, "unit", None))
+        if version is not None and unit is not None and unit.version_id != version.pk:
+            raise serializers.ValidationError({"unit": "Must belong to the selected edition."})
+        return attrs

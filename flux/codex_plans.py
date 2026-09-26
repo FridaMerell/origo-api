@@ -6,12 +6,16 @@ from django.db import transaction
 from django.db.models import Count
 
 from flux.models import (
+    ApiOperation,
+    ApiOperationResponse,
+    ApiProjection,
     Document,
     Entity,
     Field,
     Integration,
     IntegrationOperation,
     Milestone,
+    Provider,
     Project,
     Relation,
     Resource,
@@ -139,7 +143,7 @@ def _validate_parent_refs(parent_refs):
 
 
 def serialize_project(project):
-    milestones = list(project.milestones.order_by('id'))
+    milestones = list(project.milestones.order_by('order', 'created_at', 'id'))
     tasks = list(project.tasks.order_by('id'))
     return {
         'id': project.id,
@@ -234,11 +238,38 @@ def serialize_project(project):
                 'id': item.id,
                 'entity_id': item.entity_id,
                 'path': item.path,
-                'operations': item.operations,
-                'filters': item.filters,
-                'ordering': item.ordering,
+                'title': item.title,
+                'description': item.description,
             }
             for item in Resource.objects.filter(entity__project=project).order_by('id')
+        ],
+        'api_projections': [
+            {
+                'id': item.id,
+                'project_id': item.project_id,
+                'name': item.name,
+                'schema': item.schema,
+                'description': item.description,
+            }
+            for item in ApiProjection.objects.filter(project=project).order_by('id')
+        ],
+        'api_operations': [
+            {'id': item.id, 'resource_id': item.resource_id, 'key': item.key, 'method': item.method,
+             'path': item.path, 'title': item.title, 'description': item.description,
+             'parameters': item.parameters, 'request_schema': item.request_schema, 'pagination': item.pagination,
+             'responses': [{'id': response.id, 'status_code': response.status_code,
+                            'description': response.description, 'projection_id': response.projection_id}
+                           for response in item.responses.all()]}
+            for item in ApiOperation.objects.filter(resource__entity__project=project).prefetch_related('responses').order_by('id')
+        ],
+        'providers': [
+            {
+                'id': item.id,
+                'name': item.name,
+                'description': item.description,
+                'resource_ids': [resource.id for resource in item.resources.all()],
+            }
+            for item in project.providers.prefetch_related('resources').order_by('id')
         ],
         'roles': [
             {
@@ -246,7 +277,7 @@ def serialize_project(project):
                 'name': role.name,
                 'description': role.description,
                 'permissions': [
-                    {'resource_id': p.resource_id, 'operation': p.operation, 'scope': p.scope}
+                    {'operation_id': p.api_operation_id, 'scope': p.scope}
                     for p in role.permissions.all()
                 ],
             }
@@ -624,10 +655,62 @@ def _append_design_to_project(project, user, plan, entities):
         resources[entity.name] = Resource.objects.create(
             entity=entity,
             path=_text(item.get('path'), 'resource.path', required=True, maximum=100),
-            operations=_string_list(item, 'operations', Resource.Operation.values),
-            filters=_string_list(item, 'filters'),
-            ordering=_text(item.get('ordering'), 'resource.ordering', maximum=100),
+            title=_text(item.get('title'), 'resource.title', maximum=100),
+            description=_text(item.get('description'), 'resource.description', maximum=10000),
         )
+
+    for item in _items(plan, 'api_projections'):
+        schema = item.get('schema', {})
+        if not isinstance(schema, dict):
+            raise CodexPlanError('api_projection.schema must be an object.')
+        ApiProjection.objects.create(
+            project=project,
+            name=_ref(item, 'name'),
+            schema=schema,
+            description=_text(item.get('description'), 'api_projection.description', maximum=10000),
+        )
+
+    projections = {item.name: item for item in ApiProjection.objects.filter(project=project)}
+    for item in _items(plan, 'api_operations'):
+        entity = entity_for(item.get('resource_ref'), 'resource_ref')
+        resource = resources.get(entity.name) or Resource.objects.filter(entity=entity).first()
+        if resource is None:
+            raise CodexPlanError(f'Entity {entity.name} has no resource for an API operation.')
+        operation = ApiOperation.objects.create(
+            resource=resource, key=_choice(item, 'key', ApiOperation.Key.values, ApiOperation.Key.CUSTOM),
+            method=_text(item.get('method'), 'api_operation.method', required=True, maximum=10).upper(),
+            path=_text(item.get('path'), 'api_operation.path', required=True, maximum=255),
+            title=_text(item.get('title'), 'api_operation.title', required=True, maximum=100),
+            description=_text(item.get('description'), 'api_operation.description', maximum=10000),
+            parameters=item.get('parameters', []), request_schema=item.get('request_schema'), pagination=item.get('pagination'),
+        )
+        for response in _items(item, 'responses'):
+            projection = projections.get(response.get('projection_ref')) if response.get('projection_ref') else None
+            ApiOperationResponse.objects.create(operation=operation, status_code=response.get('status_code'),
+                                                description=_text(response.get('description'), 'response.description', maximum=10000), projection=projection)
+
+    provider_names = set(project.providers.values_list('name', flat=True))
+    for item in _items(plan, 'providers'):
+        name = _text(item.get('name'), 'provider.name', required=True, maximum=100)
+        if name in provider_names:
+            raise CodexPlanError(f'Provider name already exists in this project: {name}.')
+        resource_refs = _string_list(item, 'resource_refs')
+        if not resource_refs:
+            raise CodexPlanError('A provider must select at least one resource_ref.')
+        provider = Provider.objects.create(
+            project=project,
+            name=name,
+            description=_text(item.get('description'), 'provider.description', maximum=10000),
+        )
+        selected_resources = []
+        for ref in resource_refs:
+            entity = entity_for(ref, 'resource_refs')
+            resource = resources.get(entity.name) or Resource.objects.filter(entity=entity).first()
+            if resource is None:
+                raise CodexPlanError(f'Entity {entity.name} has no resource for provider {name}.')
+            selected_resources.append(resource)
+        provider.resources.set(selected_resources)
+        provider_names.add(name)
 
     role_names = set(project.roles.values_list('name', flat=True))
     for item in _items(plan, 'roles'):
@@ -646,14 +729,15 @@ def _append_design_to_project(project, user, plan, entities):
             resource = resources.get(entity.name) or Resource.objects.filter(entity=entity).first()
             if resource is None:
                 raise CodexPlanError(f'Entity {entity.name} has no resource to grant permissions on.')
-            operation = _choice(permission, 'operation', Resource.Operation.values, Resource.Operation.LIST)
-            if (resource.pk, operation) in granted:
-                raise CodexPlanError(f'Role {role_name} grants {operation} on {entity.name} more than once.')
-            granted.add((resource.pk, operation))
+            operation = ApiOperation.objects.filter(resource=resource, key=permission.get('operation')).first()
+            if operation is None:
+                raise CodexPlanError(f'Role {role_name} references an unknown API operation on {entity.name}.')
+            if operation.pk in granted:
+                raise CodexPlanError(f'Role {role_name} grants {operation.key} on {entity.name} more than once.')
+            granted.add(operation.pk)
             RolePermission.objects.create(
                 role=role,
-                resource=resource,
-                operation=operation,
+                api_operation=operation,
                 scope=_choice(permission, 'scope', RolePermission.Scope.values, RolePermission.Scope.ALL),
             )
 
@@ -889,25 +973,22 @@ def update_resource_in_private_project(user, project_id, entity_id, payload):
     try:
         resource = Resource.objects.get(entity=entity)
     except Resource.DoesNotExist:
-        if 'path' not in payload or 'operations' not in payload:
-            raise CodexPlanError('A new resource requires path and operations.')
+        if 'path' not in payload:
+            raise CodexPlanError('A new resource requires path.')
         resource = Resource(entity=entity)
 
     update_fields = []
     if 'path' in payload:
         resource.path = _text(payload.get('path'), 'resource.path', required=True, maximum=100)
         update_fields.append('path')
-    if 'operations' in payload:
-        resource.operations = _string_list(payload, 'operations', Resource.Operation.values)
-        update_fields.append('operations')
-    if 'filters' in payload:
-        resource.filters = _string_list(payload, 'filters')
-        update_fields.append('filters')
-    if 'ordering' in payload:
-        resource.ordering = _text(payload.get('ordering'), 'resource.ordering', maximum=100)
-        update_fields.append('ordering')
+    if 'title' in payload:
+        resource.title = _text(payload.get('title'), 'resource.title', maximum=100)
+        update_fields.append('title')
+    if 'description' in payload:
+        resource.description = _text(payload.get('description'), 'resource.description', maximum=10000)
+        update_fields.append('description')
     if not update_fields:
-        raise CodexPlanError('Provide at least one of: path, operations, filters, ordering.')
+        raise CodexPlanError('Provide at least one of: path, title, description.')
     if resource.pk is None:
         resource.save()
     else:
@@ -916,10 +997,255 @@ def update_resource_in_private_project(user, project_id, entity_id, payload):
         'id': resource.id,
         'entity_id': entity.id,
         'path': resource.path,
-        'operations': resource.operations,
-        'filters': resource.filters,
-        'ordering': resource.ordering,
+        'title': resource.title,
+        'description': resource.description,
     }
+
+
+def _serialize_api_projection(projection):
+    return {
+        'id': projection.id,
+        'project_id': projection.project_id,
+        'name': projection.name,
+        'schema': projection.schema,
+        'description': projection.description,
+    }
+
+
+def create_api_projection_in_private_project(user, project_id, payload):
+    """Create one typed API projection for a private Codex project."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('api_projection must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    schema = payload.get('schema', {})
+    if not isinstance(schema, dict):
+        raise CodexPlanError('schema must be an object.')
+    projection = ApiProjection.objects.create(
+        project=project,
+        name=_text(payload.get('name'), 'name', required=True, maximum=100),
+        schema=schema,
+        description=_text(payload.get('description'), 'description', maximum=10000),
+    )
+    return _serialize_api_projection(projection)
+
+
+def update_api_projection_in_private_project(user, project_id, projection_id, payload):
+    """Partially update one typed API projection in a private Codex project."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('api_projection must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+        projection = ApiProjection.objects.get(pk=projection_id, project=project)
+    except (Project.DoesNotExist, ApiProjection.DoesNotExist) as exc:
+        raise CodexPlanError('API projection not found in this private project.') from exc
+    fields = []
+    for name, maximum in [('name', 100), ('description', 10000)]:
+        if name in payload:
+            setattr(projection, name, _text(payload[name], name, required=name != 'description', maximum=maximum))
+            fields.append(name)
+    if 'schema' in payload:
+        if not isinstance(payload['schema'], dict):
+            raise CodexPlanError('schema must be an object.')
+        projection.schema = payload['schema']
+        fields.append('schema')
+    if fields:
+        projection.save(update_fields=fields)
+    if not fields:
+        raise CodexPlanError('Provide at least one API projection field to update.')
+    return _serialize_api_projection(projection)
+
+
+def delete_api_projection_in_private_project(user, project_id, projection_id):
+    try:
+        projection = ApiProjection.objects.get(
+            pk=projection_id, project__in=_private_projects_for(user).filter(pk=project_id)
+        )
+    except ApiProjection.DoesNotExist as exc:
+        raise CodexPlanError('API projection not found in this private project.') from exc
+    projection.delete()
+    return {'id': projection_id, 'deleted': True}
+
+
+def _serialize_api_operation(operation):
+    return {'id': operation.id, 'resource_id': operation.resource_id, 'key': operation.key,
+            'method': operation.method, 'path': operation.path, 'title': operation.title,
+            'description': operation.description, 'parameters': operation.parameters,
+            'request_schema': operation.request_schema, 'pagination': operation.pagination}
+
+
+def create_api_operation_in_private_project(user, project_id, payload):
+    project = _private_projects_for(user).filter(pk=project_id).first()
+    if not project or not isinstance(payload, dict):
+        raise CodexPlanError('api_operation must be an object in a private project.')
+    resource = Resource.objects.filter(pk=_optional_id(payload.get('resource_id'), 'resource_id'), entity__project=project).first()
+    if resource is None:
+        raise CodexPlanError('resource_id must belong to this project.')
+    for name in ('parameters', 'request_schema', 'pagination'):
+        if payload.get(name) is not None and not isinstance(payload[name], (list, dict)):
+            raise CodexPlanError(f'{name} must be a JSON array or object.')
+    operation = ApiOperation.objects.create(resource=resource,
+        key=_choice(payload, 'key', ApiOperation.Key.values, None),
+        method=_text(payload.get('method'), 'method', required=True, maximum=10).upper(),
+        path=_text(payload.get('path'), 'path', required=True, maximum=255),
+        title=_text(payload.get('title'), 'title', required=True, maximum=100),
+        description=_text(payload.get('description'), 'description', maximum=10000),
+        parameters=payload.get('parameters', []), request_schema=payload.get('request_schema'), pagination=payload.get('pagination'))
+    return _serialize_api_operation(operation)
+
+
+def update_api_operation_in_private_project(user, project_id, operation_id, payload):
+    operation = ApiOperation.objects.filter(pk=operation_id, resource__entity__project__in=_private_projects_for(user).filter(pk=project_id)).first()
+    if operation is None or not isinstance(payload, dict):
+        raise CodexPlanError('API operation not found in this private project.')
+    fields = []
+    for name, maximum in [('method', 10), ('path', 255), ('title', 100), ('description', 10000)]:
+        if name in payload:
+            setattr(operation, name, _text(payload[name], name, required=name != 'description', maximum=maximum).upper() if name == 'method' else _text(payload[name], name, required=name != 'description', maximum=maximum))
+            fields.append(name)
+    if 'key' in payload:
+        operation.key = _choice(payload, 'key', ApiOperation.Key.values, operation.key); fields.append('key')
+    for name in ('parameters', 'request_schema', 'pagination'):
+        if name in payload:
+            if payload[name] is not None and not isinstance(payload[name], (list, dict)):
+                raise CodexPlanError(f'{name} must be a JSON array or object.')
+            setattr(operation, name, payload[name]); fields.append(name)
+    if not fields:
+        raise CodexPlanError('Provide at least one API operation field to update.')
+    operation.save(update_fields=fields)
+    return _serialize_api_operation(operation)
+
+
+def delete_api_operation_in_private_project(user, project_id, operation_id):
+    operation = ApiOperation.objects.filter(pk=operation_id, resource__entity__project__in=_private_projects_for(user).filter(pk=project_id)).first()
+    if operation is None:
+        raise CodexPlanError('API operation not found in this private project.')
+    operation.delete()
+    return {'id': operation_id, 'deleted': True}
+
+
+def _serialize_api_operation_response(response):
+    return {'id': response.id, 'operation_id': response.operation_id, 'status_code': response.status_code,
+            'description': response.description, 'projection_id': response.projection_id}
+
+
+def create_api_operation_response_in_private_project(user, project_id, payload):
+    project = _private_projects_for(user).filter(pk=project_id).first()
+    if not project or not isinstance(payload, dict):
+        raise CodexPlanError('api_operation_response must be an object in a private project.')
+    operation = ApiOperation.objects.filter(pk=_optional_id(payload.get('operation_id'), 'operation_id'), resource__entity__project=project).first()
+    projection_id = _optional_id(payload.get('projection_id'), 'projection_id') if payload.get('projection_id') is not None else None
+    projection = ApiProjection.objects.filter(pk=projection_id, project=project).first() if projection_id else None
+    if operation is None or (projection_id and projection is None):
+        raise CodexPlanError('Operation and projection must belong to this project.')
+    response = ApiOperationResponse.objects.create(operation=operation, status_code=payload.get('status_code'), projection=projection,
+        description=_text(payload.get('description'), 'description', maximum=10000))
+    return _serialize_api_operation_response(response)
+
+
+def update_api_operation_response_in_private_project(user, project_id, response_id, payload):
+    response = ApiOperationResponse.objects.filter(pk=response_id, operation__resource__entity__project__in=_private_projects_for(user).filter(pk=project_id)).first()
+    if response is None or not isinstance(payload, dict):
+        raise CodexPlanError('API operation response not found in this private project.')
+    fields = []
+    if 'status_code' in payload:
+        response.status_code = payload['status_code']; fields.append('status_code')
+    if 'description' in payload:
+        response.description = _text(payload['description'], 'description', maximum=10000); fields.append('description')
+    if 'projection_id' in payload:
+        projection_id = _optional_id(payload['projection_id'], 'projection_id') if payload['projection_id'] is not None else None
+        projection = ApiProjection.objects.filter(pk=projection_id, project=response.operation.resource.entity.project).first() if projection_id else None
+        if projection_id and projection is None:
+            raise CodexPlanError('projection_id must belong to this project.')
+        response.projection = projection; fields.append('projection')
+    if not fields:
+        raise CodexPlanError('Provide at least one API operation response field to update.')
+    response.save(update_fields=fields)
+    return _serialize_api_operation_response(response)
+
+
+def delete_api_operation_response_in_private_project(user, project_id, response_id):
+    response = ApiOperationResponse.objects.filter(pk=response_id, operation__resource__entity__project__in=_private_projects_for(user).filter(pk=project_id)).first()
+    if response is None:
+        raise CodexPlanError('API operation response not found in this private project.')
+    response.delete()
+    return {'id': response_id, 'deleted': True}
+
+
+def _serialize_provider(provider):
+    return {
+        'id': provider.id,
+        'name': provider.name,
+        'description': provider.description,
+        'resource_ids': list(provider.resources.values_list('id', flat=True)),
+    }
+
+
+def _provider_selection(project, payload):
+    resource_ids = payload.get('resource_ids', [])
+    if not isinstance(resource_ids, list) or any(not isinstance(item, int) for item in resource_ids):
+        raise CodexPlanError('resource_ids must be a list of integer ids.')
+    if not resource_ids:
+        raise CodexPlanError('A provider must select at least one resource.')
+    resources = list(Resource.objects.filter(pk__in=resource_ids, entity__project=project))
+    if len(resources) != len(set(resource_ids)):
+        raise CodexPlanError('Provider selections must belong to this project.')
+    return resources
+
+
+def create_provider_in_private_project(user, project_id, payload):
+    if not isinstance(payload, dict):
+        raise CodexPlanError('provider must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    resources = _provider_selection(project, payload)
+    provider = Provider.objects.create(
+        project=project,
+        name=_text(payload.get('name'), 'name', required=True, maximum=100),
+        description=_text(payload.get('description'), 'description', maximum=10000),
+    )
+    provider.resources.set(resources)
+    return _serialize_provider(provider)
+
+
+def update_provider_in_private_project(user, project_id, provider_id, payload):
+    if not isinstance(payload, dict):
+        raise CodexPlanError('provider must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+        provider = project.providers.get(pk=provider_id)
+    except (Project.DoesNotExist, Provider.DoesNotExist) as exc:
+        raise CodexPlanError('Provider not found in this private project.') from exc
+    fields = []
+    for name, maximum in [('name', 100), ('description', 10000)]:
+        if name in payload:
+            setattr(provider, name, _text(payload[name], name, required=name == 'name', maximum=maximum))
+            fields.append(name)
+    selection_keys = {'resource_ids'} & payload.keys()
+    if selection_keys:
+        merged = {
+            'resource_ids': payload.get('resource_ids', list(provider.resources.values_list('id', flat=True))),
+        }
+        resources = _provider_selection(project, merged)
+        provider.resources.set(resources)
+    if not fields and not selection_keys:
+        raise CodexPlanError('Provide at least one provider field to update.')
+    if fields:
+        provider.save(update_fields=fields)
+    return _serialize_provider(provider)
+
+
+def delete_provider_in_private_project(user, project_id, provider_id):
+    try:
+        provider = Provider.objects.get(pk=provider_id, project__in=_private_projects_for(user).filter(pk=project_id))
+    except Provider.DoesNotExist as exc:
+        raise CodexPlanError('Provider not found in this private project.') from exc
+    provider.delete()
+    return {'id': provider_id, 'deleted': True}
 
 
 def update_role_in_private_project(user, project_id, role_id, payload):
@@ -947,26 +1273,22 @@ def update_role_in_private_project(user, project_id, role_id, payload):
     permissions = []
     if replace_permissions:
         permission_payloads = _items(payload, 'permissions')
-        resources = {
-            resource.id: resource
-            for resource in Resource.objects.filter(entity__project=project)
-        }
+        operations = {operation.id: operation for operation in ApiOperation.objects.filter(resource__entity__project=project)}
         seen = set()
         for item in permission_payloads:
-            resource_id = _optional_id(item.get('resource_id'), 'permission.resource_id')
-            if resource_id not in resources:
-                raise CodexPlanError('Permission resource is not in this project.')
-            operation = _choice(item, 'operation', Resource.Operation.values, None)
+            operation_id = _optional_id(item.get('operation_id'), 'permission.operation_id')
+            if operation_id not in operations:
+                raise CodexPlanError('Permission operation is not in this project.')
+            operation = operations[operation_id]
             scope = _choice(item, 'scope', RolePermission.Scope.values, RolePermission.Scope.ALL)
-            key = (resource_id, operation)
+            key = operation_id
             if key in seen:
                 raise CodexPlanError('A role may grant each resource operation only once.')
             seen.add(key)
             permissions.append(
                 RolePermission(
                     role=role,
-                    resource=resources[resource_id],
-                    operation=operation,
+                    api_operation=operation,
                     scope=scope,
                 )
             )
@@ -985,8 +1307,7 @@ def update_role_in_private_project(user, project_id, role_id, payload):
         'description': role.description,
         'permissions': [
             {
-                'resource_id': permission.resource_id,
-                'operation': permission.operation,
+                'operation_id': permission.api_operation_id,
                 'scope': permission.scope,
             }
             for permission in role.permissions.order_by('id')
@@ -1029,7 +1350,11 @@ def upsert_relations_to_private_project(user, project_id, payload):
                 raise CodexPlanError(f'Unknown target_ref: {target_name}.')
             if source.fields.filter(name=relation_name).exists():
                 raise CodexPlanError(f'Relation name {relation_name} clashes with a field on {source_name}.')
-            relation, _ = Relation.objects.get_or_create(source=source, name=relation_name)
+            relation, _ = Relation.objects.get_or_create(
+                source=source,
+                name=relation_name,
+                defaults={'target': target},
+            )
             relation.target = target
             relation.kind = _choice(item, 'kind', Relation.Kind.values, Relation.Kind.FOREIGN_KEY)
             relation.related_name = _text(item.get('related_name'), 'relation.related_name', maximum=100)

@@ -2,7 +2,7 @@
 
 import json
 
-from .common import api_name, pascal
+from .common import api_name, pascal, snake
 
 _TYPES = {
     "string": "string",
@@ -20,6 +20,36 @@ _TYPES = {
     "email": "string",
     "url": "string",
 }
+
+_SCHEMA_TYPES = {
+    "string": "string",
+    "integer": "number",
+    "number": "number",
+    "boolean": "boolean",
+    "null": "null",
+}
+
+
+def _projection_type(schema, indent=""):
+    """Translate the useful JSON Schema subset without guessing unknown shapes."""
+    if not isinstance(schema, dict):
+        return "unknown"
+    schema_type = schema.get("type")
+    if schema_type in _SCHEMA_TYPES:
+        return _SCHEMA_TYPES[schema_type]
+    if schema_type == "array":
+        return f"Array<{_projection_type(schema.get('items'))}>"
+    if schema_type != "object" or not isinstance(schema.get("properties"), dict):
+        return "unknown"
+    required = set(schema.get("required", []))
+    child_indent = indent + "  "
+    properties = []
+    for name, property_schema in schema["properties"].items():
+        optional = "" if name in required else "?"
+        properties.append(
+            f"{child_indent}{json.dumps(name)}{optional}: {_projection_type(property_schema, child_indent)};"
+        )
+    return "{\n" + "\n".join(properties) + f"\n{indent}}}"
 
 
 def types_file(spec):
@@ -54,7 +84,20 @@ def types_file(spec):
         filter_lines.extend(f"  {name}?: string;" for name in resource.get("filters", []))
         filter_lines.append("}")
         blocks.append("\n".join(filter_lines))
+    for projection in spec.get("api_projections", []):
+        blocks.append(f"export type {pascal(projection['name'])}Response = {_projection_type(projection['schema'])};")
     return "\n\n".join(blocks) + "\n"
+
+
+def projections_file(spec):
+    entries = [
+        {
+            "name": projection["name"],
+            "schema": projection["schema"],
+        }
+        for projection in spec.get("api_projections", [])
+    ]
+    return "export const apiProjections = " + json.dumps(entries, indent=2, ensure_ascii=False) + " as const;\n"
 
 
 def api_file(spec):
@@ -73,7 +116,11 @@ def api_file(spec):
     lines = [
         f"import type {{ {', '.join(names)} }} from './types';",
         "",
-        'const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";',
+        'let apiBase = process.env.NEXT_PUBLIC_API_URL ?? "/api";',
+        "",
+        "export function setApiBase(url: string) {",
+        '  apiBase = url.replace(/[/]$/, "");',
+        "}",
         "",
     ]
     if auth == "session":
@@ -103,7 +150,7 @@ def api_file(spec):
         header_lines.append(extra_headers)
     lines += [
         "async function request<T>(path: string, init?: RequestInit): Promise<T> {",
-        "  const response = await fetch(`${API_BASE}${path}`, {",
+        "  const response = await fetch(`${apiBase}${path}`, {",
         "    ...init,",
         "    headers: {",
         *header_lines,
@@ -157,6 +204,35 @@ def api_file(spec):
     return "\n".join(lines) + "\n"
 
 
+def provider_files(spec):
+    """Generate only the provider boundaries explicitly designed for this project."""
+    resources_by_entity = {resource["entity"]: resource for resource in spec["resources"]}
+    files = []
+    for provider in spec.get("providers", []):
+        selected = set(provider["resources"])
+        clients = [resources_by_entity[name] for name in sorted(selected) if name in resources_by_entity]
+        name = pascal(provider["name"])
+        imports = ", ".join(f"{pascal(item['entity'])}Api" for item in clients)
+        values = ", ".join(f"{pascal(item['entity'])}Api" for item in clients)
+        source = f'''"use client";
+
+import {{ createContext, useContext, type ReactNode }} from "react";
+import {{ {imports} }} from "../api";
+
+const {name}Context = createContext({{{values}}});
+
+export function {name}Provider({{ children }}: {{ children: ReactNode }}) {{
+  return <{name}Context.Provider value={{{{{values}}}}}>{{children}}</{name}Context.Provider>;
+}}
+
+export function use{name}() {{
+  return useContext({name}Context);
+}}
+'''
+        files.append({"path": f"providers/{snake(provider['name'])}-provider.tsx", "content": source})
+    return files
+
+
 def routes_file(spec):
     lines = ["export const routes = ["]
     for screen in spec["screens"]:
@@ -173,7 +249,9 @@ def routes_file(spec):
 def generate(spec):
     files = [{"path": "types.ts", "content": types_file(spec)}]
     if spec["resources"]:
+        files.append({"path": "api-projections.ts", "content": projections_file(spec)})
         files.append({"path": "api.ts", "content": api_file(spec)})
+        files.extend(provider_files(spec))
     if spec["screens"]:
         files.append({"path": "routes.ts", "content": routes_file(spec)})
     return files

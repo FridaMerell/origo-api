@@ -1,5 +1,6 @@
 """Naming helpers shared by the scaffold generators."""
 
+import json
 import re
 
 _WORDS = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+\d*|[A-Z]+\d*|\d+")
@@ -39,3 +40,23 @@ def entity_by_name(spec, name):
         if entity["name"] == name:
             return entity
     return None
+
+
+def api_projections_markdown(spec):
+    """Render derived and transient response contracts for every scaffold target."""
+    projections = spec.get("api_projections", [])
+    if not projections:
+        return "# API projections\n\nNo API projections are defined.\n"
+    lines = ["# API projections", "", "These are response contracts, not persistent entities.", ""]
+    for projection in projections:
+        lines += [
+            f"## {projection['resource']}.{projection['endpoint']}: {projection['name']}",
+            "",
+            f"- Method: `{projection['method']}`",
+            f"- Lifecycle: `{projection['lifecycle']}`",
+            f"- Sources: {', '.join(projection['sources']) or 'none'}",
+        ]
+        if projection.get("description"):
+            lines.append(f"- {projection['description']}")
+        lines += ["", "```json", json.dumps(projection['schema'], indent=2, ensure_ascii=False), "```", ""]
+    return "\n".join(lines) + "\n"

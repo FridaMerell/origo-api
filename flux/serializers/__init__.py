@@ -2,8 +2,12 @@
 
 from .datamodel import EntitySerializer, FieldSerializer, RelationSerializer
 from .design import (
+    ApiProjectionSerializer,
+    ApiOperationResponseSerializer,
+    ApiOperationSerializer,
     IntegrationOperationSerializer,
     IntegrationSerializer,
+    ProviderSerializer,
     ResourceSerializer,
     RolePermissionSerializer,
     RoleSerializer,
@@ -21,12 +25,16 @@ from .updates import UpdateSerializer
 
 __all__ = [
     "DocumentSerializer",
+    "ApiProjectionSerializer",
+    "ApiOperationSerializer",
+    "ApiOperationResponseSerializer",
     "EntitySerializer",
     "FieldSerializer",
     "IntegrationOperationSerializer",
     "IntegrationSerializer",
     "MilestoneSerializer",
     "ProjectSerializer",
+    "ProviderSerializer",
     "RelationSerializer",
     "ResourceSerializer",
     "RolePermissionSerializer",

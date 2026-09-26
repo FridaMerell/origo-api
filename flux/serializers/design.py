@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 
-from flux.models import Integration, IntegrationOperation, Resource, Role, RolePermission, Screen, SeedRow, StackProfile
+from flux.models import ApiOperation, ApiOperationResponse, ApiProjection, Integration, IntegrationOperation, Provider, Resource, Role, RolePermission, Screen, SeedRow, StackProfile
 from flux.services.scaffold import integration as integration_rules
 from flux.services.scaffold.spec import entity_mapping_info, unknown_seed_keys
 
@@ -44,23 +44,81 @@ class StackProfileSerializer(_ProjectMemberMixin, serializers.ModelSerializer):
 
 
 class ResourceSerializer(serializers.ModelSerializer):
+    title = serializers.ReadOnlyField()
+    description = serializers.ReadOnlyField()
+
     class Meta:
         model = Resource
-        fields = ["id", "entity", "path", "operations", "filters", "ordering"]
+        fields = ["id", "entity", "path", "title", "description"]
 
     def validate_entity(self, entity):
         _require_member(entity.project, self.context["request"].user)
         return entity
 
-    def validate_operations(self, value):
-        _string_list(value, "operations")
-        unknown = set(value) - set(Resource.Operation.values)
-        if unknown:
-            raise serializers.ValidationError(f"Unknown operations: {', '.join(sorted(unknown))}.")
+class ApiProjectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ApiProjection
+        fields = [
+            "id", "project", "name", "description", "schema",
+        ]
+        extra_kwargs = {"project": {"required": True, "allow_null": False}}
+
+    def validate_schema(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Schema must be an object.")
         return value
 
-    def validate_filters(self, value):
-        return _string_list(value, "filters")
+    def validate_project(self, project):
+        _require_member(project, self.context["request"].user)
+        return project
+
+
+class ApiOperationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ApiOperation
+        fields = ["id", "resource", "key", "method", "path", "title", "description", "parameters", "request_schema", "pagination"]
+
+    def validate_resource(self, resource):
+        _require_member(resource.entity.project, self.context["request"].user)
+        return resource
+
+    def validate(self, attrs):
+        for name in ("parameters", "request_schema", "pagination"):
+            value = attrs.get(name)
+            if value is not None and not isinstance(value, (list, dict)):
+                raise serializers.ValidationError({name: "Must be a JSON array or object."})
+        return attrs
+
+
+class ApiOperationResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ApiOperationResponse
+        fields = ["id", "operation", "status_code", "description", "projection"]
+
+    def validate(self, attrs):
+        operation = attrs.get("operation") or self.instance.operation
+        projection = attrs.get("projection") if "projection" in attrs else getattr(self.instance, "projection", None)
+        if projection and projection.project_id != operation.resource.entity.project_id:
+            raise serializers.ValidationError({"projection": "Projection must belong to the operation project."})
+        return attrs
+
+
+class ProviderSerializer(_ProjectMemberMixin, serializers.ModelSerializer):
+    class Meta:
+        model = Provider
+        fields = ["id", "project", "name", "description", "resources"]
+
+    def validate(self, attrs):
+        project = attrs.get("project") or getattr(self.instance, "project", None)
+        resources = attrs.get("resources")
+        if self.instance is not None:
+            if resources is None:
+                resources = self.instance.resources.all()
+        if resources is not None and any(resource.entity.project_id != project.pk for resource in resources):
+            raise serializers.ValidationError({"resources": "Resources must belong to the provider project."})
+        if not resources:
+            raise serializers.ValidationError("A provider must select at least one resource.")
+        return attrs
 
 
 class RoleSerializer(_ProjectMemberMixin, serializers.ModelSerializer):
@@ -72,7 +130,7 @@ class RoleSerializer(_ProjectMemberMixin, serializers.ModelSerializer):
 class RolePermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = RolePermission
-        fields = ["id", "role", "resource", "operation", "scope"]
+        fields = ["id", "role", "api_operation", "scope"]
 
     def validate_role(self, role):
         _require_member(role.project, self.context["request"].user)
@@ -80,9 +138,11 @@ class RolePermissionSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         role = attrs.get("role") or getattr(self.instance, "role", None)
-        resource = attrs.get("resource") or getattr(self.instance, "resource", None)
-        if resource.entity.project_id != role.project_id:
-            raise serializers.ValidationError({"resource": "Resource must belong to the same project as the role."})
+        operation = attrs.get("api_operation") or getattr(self.instance, "api_operation", None)
+        if operation is None:
+            raise serializers.ValidationError({"api_operation": "An API operation is required."})
+        if operation.resource.entity.project_id != role.project_id:
+            raise serializers.ValidationError({"api_operation": "Operation must belong to the same project as the role."})
         return attrs
 
 

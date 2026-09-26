@@ -17,7 +17,8 @@ from opus.views import (
     LexicalEntryViewSet,
     ReadingProgressViewSet,
     SourceFileViewSet,
-    ReadingStatusView,
+    ReadingView,
+    WorkReadingProgressView,
     ShelfViewSet,
     TextUnitViewSet,
     EditionViewSet,
@@ -50,6 +51,7 @@ router.register("works", WorkViewSet, basename="work")
 router.register("work-contributors", WorkContributorViewSet, basename="work-contributor")
 
 urlpatterns = [
-    path("status/", ReadingStatusView.as_view(), name="reading-status"),
+    path("read/<int:work_id>/progress/", WorkReadingProgressView.as_view(), name="read-work-progress"),
+    path("read/<int:work_id>/", ReadingView.as_view(), name="read-work"),
     path("", include(router.urls)),
 ]

@@ -1,5 +1,13 @@
 # Flux Codex integration
 
+## Local Flux exception
+
+Codex may call the dedicated local Flux Codex API at
+`http://origo.test:8000/api/flux/codex` for this repository. This exception
+applies only to that API and only with `FLUX_CODEX_TOKEN`; it does not permit
+starting, managing, or calling other local development servers, databases, or
+migration commands.
+
 ## Recurring background tasks
 
 When adding a new self-scheduling periodic task, register it in
@@ -39,6 +47,36 @@ as a substitute for updating an existing one.
 - Do not call the generic `/api/flux/projects/`, `/milestones/`, `/tasks/`, or
   `/updates/` endpoints through this integration.  Do not alter membership,
   delete resources, or use a project owned by another user.
+
+### API contracts
+
+`Resource` is the API surface for one Entity and stores only its path, title,
+and description. `ApiOperation` is the only endpoint contract: it owns key,
+method, path, title, description, parameters, request schema, pagination and
+one or more `ApiOperationResponse` status declarations. A response optionally
+references an `ApiProjection`, which is a reusable project-level response
+schema (`name`, `description`, `schema`) rather than an endpoint.
+
+Read `api_operations`, `api_operation_responses`, and `api_projections` from
+`GET {base}/projects/{id}/`. Use persistent IDs and read the project back after
+each write. RolePermission references an ApiOperation and keeps its scope.
+
+### Providers
+
+`Provider` defines a generated frontend data boundary by selecting one or more
+resources belonging to the same project. Entity scope is derived from each
+resource; do not send or maintain `entity_ids`.
+
+For a private project, agents may manage providers through:
+
+- `POST {base}/projects/{project_id}/providers/`
+- `PATCH {base}/projects/{project_id}/providers/{provider_id}/`
+- `DELETE {base}/projects/{project_id}/providers/{provider_id}/`
+
+Create payloads require `name` and `resource_ids`. Patch only the fields that
+change; omitted selections are preserved. All IDs must be persistent IDs from
+the project read response and belong to that project. Read the project back
+after every provider write.
 
 The upload payload follows Flux's domain model directly:
 

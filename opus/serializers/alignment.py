@@ -36,6 +36,9 @@ class AlignmentSetSerializer(serializers.ModelSerializer):
         if source is not None and target is not None and source.pk == target.pk:
             raise serializers.ValidationError("Source and target editions must be different.")
         work = attrs.get("work") or getattr(self.instance, "work", None)
+        is_public = attrs.get("is_public", getattr(self.instance, "is_public", False))
+        if work is not None and work.is_private and is_public:
+            raise serializers.ValidationError({"is_public": "An alignment for a private work cannot be public."})
         for edition in (source, target):
             if work is not None and edition is not None and edition.work_id != work.pk:
                 raise serializers.ValidationError("All editions must belong to the alignment set's work.")
@@ -90,6 +93,10 @@ class AlignmentMemberSerializer(serializers.ModelSerializer):
             unit = attrs.get(key, getattr(self.instance, key, None))
             if unit is not None and alignment_version is not None and unit.version_id != alignment_version.text_version_id:
                 raise serializers.ValidationError({key: "Must belong to the alignment member's edition."})
+        start_unit = attrs.get("start_unit", getattr(self.instance, "start_unit", None))
+        end_unit = attrs.get("end_unit", getattr(self.instance, "end_unit", None))
+        if start_unit is not None and end_unit is not None and start_unit.position > end_unit.position:
+            raise serializers.ValidationError({"end_unit": "Must not precede start_unit."})
         return attrs
 
 
