@@ -1,6 +1,6 @@
 """Read a project's design from the database into the plain spec the generators consume."""
 
-from flux.models import Integration, Relation, Resource, Role, Screen, SeedRow, StackProfile
+from flux.models import ApiOperation, ApiProjection, Integration, Provider, Relation, Resource, Role, Screen, SeedRow, StackProfile
 
 from .common import snake
 
@@ -100,9 +100,12 @@ def build_spec(project):
             }
         )
 
-    resources = Resource.objects.filter(entity__project=project).select_related("entity").order_by("path")
-    roles = Role.objects.filter(project=project).prefetch_related("permissions__resource__entity")
+    resources = Resource.objects.filter(entity__project=project).select_related("entity").prefetch_related("api_operations").order_by("path")
+    api_operations = ApiOperation.objects.filter(resource__entity__project=project).prefetch_related("responses__projection")
+    api_projections = ApiProjection.objects.filter(project=project).order_by("name")
+    roles = Role.objects.filter(project=project).prefetch_related("permissions__api_operation__resource__entity")
     screens = Screen.objects.filter(project=project).select_related("parent").prefetch_related("entities")
+    providers = Provider.objects.filter(project=project).prefetch_related("resources__entity")
     seeds = {}
     for row in SeedRow.objects.filter(entity__project=project).order_by("order", "id"):
         seeds.setdefault(row.entity_id, []).append(row.data)
@@ -166,18 +169,35 @@ def build_spec(project):
             {
                 "entity": resource.entity.name,
                 "path": resource.path,
-                "operations": list(resource.operations),
-                "filters": list(resource.filters),
-                "ordering": resource.ordering,
+                "title": resource.title,
+                "description": resource.description,
+                "operations": [operation.key for operation in resource.api_operations.all()],
             }
             for resource in resources
+        ],
+        "api_projections": [
+            {
+                "name": projection.name,
+                "schema": projection.schema,
+                "description": projection.description,
+            }
+            for projection in api_projections
+        ],
+        "providers": [
+            {
+                "name": provider.name,
+                "description": provider.description,
+                "resources": [resource.entity.name for resource in provider.resources.all()],
+            }
+            for provider in providers
         ],
         "roles": [
             {
                 "name": role.name,
                 "permissions": [
-                    {"resource": p.resource.entity.name, "operation": p.operation, "scope": p.scope}
+                    {"resource": p.api_operation.resource.entity.name, "operation": p.api_operation.key, "scope": p.scope}
                     for p in role.permissions.all()
+                    if p.api_operation_id
                 ],
             }
             for role in roles
@@ -191,6 +211,18 @@ def build_spec(project):
                 "parent": screen.parent.name if screen.parent else None,
             }
             for screen in screens
+        ],
+        "api_operations": [
+            {
+                "resource": operation.resource.entity.name, "key": operation.key, "method": operation.method,
+                "path": operation.path, "title": operation.title, "description": operation.description,
+                "parameters": operation.parameters, "request_schema": operation.request_schema,
+                "pagination": operation.pagination,
+                "responses": [{"status_code": response.status_code, "description": response.description,
+                               "projection": response.projection.name if response.projection else None}
+                              for response in operation.responses.all()],
+            }
+            for operation in api_operations
         ],
         "integrations": [
             _integration_spec(item)

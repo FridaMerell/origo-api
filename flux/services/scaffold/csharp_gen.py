@@ -1,6 +1,6 @@
 """C# target: entity classes, DbContext and API controllers."""
 
-from .common import namespace, pascal
+from .common import api_projections_markdown, namespace, pascal
 
 _TYPES = {
     "string": "string",
@@ -187,4 +187,6 @@ def generate(spec):
             }
             for r in spec["resources"]
         ]
+    if spec.get("api_projections"):
+        files.append({"path": "API_PROJECTIONS.md", "content": api_projections_markdown(spec)})
     return files

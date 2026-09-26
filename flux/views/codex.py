@@ -26,6 +26,18 @@ from flux.codex_plans import (
     update_resource_in_private_project,
     update_role_in_private_project,
     update_document_in_private_project,
+    create_api_projection_in_private_project,
+    update_api_projection_in_private_project,
+    delete_api_projection_in_private_project,
+    create_api_operation_in_private_project,
+    update_api_operation_in_private_project,
+    delete_api_operation_in_private_project,
+    create_api_operation_response_in_private_project,
+    update_api_operation_response_in_private_project,
+    delete_api_operation_response_in_private_project,
+    create_provider_in_private_project,
+    update_provider_in_private_project,
+    delete_provider_in_private_project,
     update_milestone_status_in_private_project,
     update_task_status_in_private_project,
 )
@@ -368,6 +380,120 @@ class CodexProjectResourceUpdateView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(resource)
+
+
+class CodexProjectApiProjectionCollectionView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, project_id):
+        try:
+            result = create_api_projection_in_private_project(request.user, project_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectApiProjectionDetailView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, projection_id):
+        try:
+            result = update_api_projection_in_private_project(
+                request.user, project_id, projection_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+    def delete(self, request, project_id, projection_id):
+        try:
+            result = delete_api_projection_in_private_project(request.user, project_id, projection_id)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_204_NO_CONTENT)
+
+
+class CodexProjectApiOperationCollectionView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request, project_id):
+        try:
+            return Response(create_api_operation_in_private_project(request.user, project_id, request.data), status=status.HTTP_201_CREATED)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CodexProjectApiOperationDetailView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    def patch(self, request, project_id, operation_id):
+        try:
+            return Response(update_api_operation_in_private_project(request.user, project_id, operation_id, request.data))
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    def delete(self, request, project_id, operation_id):
+        try:
+            return Response(delete_api_operation_in_private_project(request.user, project_id, operation_id), status=status.HTTP_204_NO_CONTENT)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CodexProjectApiOperationResponseCollectionView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request, project_id):
+        try:
+            return Response(create_api_operation_response_in_private_project(request.user, project_id, request.data), status=status.HTTP_201_CREATED)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CodexProjectApiOperationResponseDetailView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    def patch(self, request, project_id, response_id):
+        try:
+            return Response(update_api_operation_response_in_private_project(request.user, project_id, response_id, request.data))
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    def delete(self, request, project_id, response_id):
+        try:
+            return Response(delete_api_operation_response_in_private_project(request.user, project_id, response_id), status=status.HTTP_204_NO_CONTENT)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CodexProjectProviderCollectionView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, project_id):
+        try:
+            result = create_provider_in_private_project(request.user, project_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectProviderDetailView(APIView):
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, provider_id):
+        try:
+            result = update_provider_in_private_project(request.user, project_id, provider_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
+    def delete(self, request, project_id, provider_id):
+        try:
+            result = delete_provider_in_private_project(request.user, project_id, provider_id)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_204_NO_CONTENT)
 
 
 class CodexProjectRoleUpdateView(APIView):

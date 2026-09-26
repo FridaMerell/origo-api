@@ -45,8 +45,8 @@ class Milestone(models.Model):
     tags = models.ManyToManyField("Tag", blank=True, related_name="milestones")
     order = models.IntegerField(default=1, null=True)
 
-    class meta:
-        ordering = ["-order", "-created_at"]
+    class Meta:
+        ordering = ["order", "created_at", "id"]
 
     def __str__(self):
         return self.title

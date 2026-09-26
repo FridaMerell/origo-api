@@ -2,46 +2,36 @@
 
 from django.db import transaction
 
-from flux.models import IntegrationOperation, Milestone, Resource, Task
+from flux.models import ApiProjection, Integration, Milestone, Resource, Task
 
 
 def generate_tasks(project):
-    """Create missing standard tasks per entity, resource, role and screen. Returns the created tasks."""
+    """Create a compact, idempotent delivery backlog from a project's design."""
+
     entities = list(project.entities.order_by("name"))
-    plan = [
-        ("Datamodell", [(f"Modell: {e.name}", "Fält, relationer och migration.") for e in entities]),
-        (
-            "API",
-            [
-                (f"API: {r.path}", f"Operationer: {', '.join(r.operations) or 'inga'}.")
-                for r in Resource.objects.filter(entity__project=project).order_by("path")
-            ],
-        ),
-        ("Behörigheter", [(f"Roll: {r.name}", "Behörighetsmatris och scope-kontroller.") for r in project.roles.order_by("name")]),
-        (
-            "Gränssnitt",
-            [(f"Skärm: {s.name}", f"Route {s.route}.") for s in project.screens.order_by("route")]
-            + (
-                [(f"Identitet: {project.identity.name}", "Tillämpa tokens, typsnitt, logotyp och ikoner enligt STYLEGUIDE.md.")]
-                if project.include_identity and project.identity_id
-                else []
-            ),
-        ),
-        (
-            "Integrationer",
-            [
-                (
-                    f"Integration: {op.integration.name}.{op.name}",
-                    "Verifiera mot live-API:t, kontrollera mappningen och kör de genererade testerna."
-                    + (" Sätt upp schemalagd synk." if op.sync else ""),
-                )
-                for op in IntegrationOperation.objects.filter(integration__project=project)
-                .select_related("integration")
-                .order_by("integration__name", "name")
-            ],
-        ),
-        ("Tester", [(f"Tester: {e.name}", "Modell-, API- och behörighetstester.") for e in entities]),
-    ]
+    resources = list(Resource.objects.filter(entity__project=project).order_by("path"))
+    projections = list(ApiProjection.objects.filter(project=project))
+    screens = list(project.screens.order_by("route"))
+    integrations = list(Integration.objects.filter(project=project).order_by("name"))
+    plan = []
+    if entities:
+        plan.append(("Datamodell", [("Implementera datamodellen", f"Implementera {len(entities)} entities, deras fält, relationer och migrationer.")]))
+    if resources or projections:
+        detail = f"Implementera {len(resources)} resurser"
+        if projections:
+            detail += f" och {len(projections)} API-projektioner"
+        plan.append(("API", [("Implementera API-kontrakten", detail + ".")]))
+    if project.roles.exists():
+        plan.append(("Behörigheter", [("Implementera appens roller", "Implementera den definierade behörighetsmatrisen och scopereglerna.")]))
+    if screens or (project.include_identity and project.identity_id):
+        detail = f"Implementera {len(screens)} skärmar"
+        if project.include_identity and project.identity_id:
+            detail += f" enligt identiteten {project.identity.name}"
+        plan.append(("Gränssnitt", [("Implementera gränssnittet", detail + ".")]))
+    if integrations:
+        plan.append(("Integrationer", [("Implementera integrationerna", f"Konfigurera och verifiera {len(integrations)} integrationer, inklusive synk där den är aktiverad.")]))
+    if entities or resources or projections:
+        plan.append(("Kvalitet", [("Verifiera designkontrakten", "Verifiera datamodell, API-kontrakt, behörigheter och integrationsflöden mot Flux-designen.")]))
     created = []
     with transaction.atomic():
         for milestone_title, items in plan:

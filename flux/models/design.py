@@ -36,24 +36,100 @@ class StackProfile(models.Model):
 
 
 class Resource(models.Model):
-    class Operation(models.TextChoices):
-        LIST = "list", "List"
-        RETRIEVE = "retrieve", "Retrieve"
-        CREATE = "create", "Create"
-        UPDATE = "update", "Update"
-        DELETE = "delete", "Delete"
-
     entity = models.OneToOneField(Entity, on_delete=models.CASCADE, related_name="resource")
     path = models.CharField(max_length=100)
-    operations = models.JSONField(default=list, blank=True)
-    filters = models.JSONField(default=list, blank=True, help_text="Field names usable as query filters.")
-    ordering = models.CharField(max_length=100, blank=True)
 
     class Meta:
         ordering = ["path"]
 
     def __str__(self):
         return self.path
+
+    @property
+    def title(self):
+        """Compatibility label until a user-managed schema change stores it."""
+        return self.path.replace("-", " ").replace("_", " ").title()
+
+    @property
+    def description(self):
+        return ""
+
+
+class ApiProjection(models.Model):
+    """A reusable API response schema; it is not an endpoint."""
+
+    # Kept nullable during the additive database transition. Existing rows are
+    # backfilled from ``resource.entity.project`` by the user-managed migration.
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="api_projections", null=True, blank=True)
+    resource = models.ForeignKey(Resource, on_delete=models.CASCADE, related_name="legacy_api_projections", null=True, blank=True)
+    name = models.CharField(max_length=100)
+    schema = models.JSONField(default=dict, blank=True)
+    endpoint = models.CharField(max_length=100, blank=True)
+    method = models.CharField(max_length=10, default="GET")
+    lifecycle = models.CharField(max_length=20, default="derived")
+    sources = models.ManyToManyField(Entity, blank=True, related_name="legacy_api_projections")
+    response_schema = models.JSONField(default=dict, blank=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = []
+
+    def __str__(self):
+        return self.name
+
+
+class ApiOperation(models.Model):
+    class Key(models.TextChoices):
+        LIST = "list", "List"
+        RETRIEVE = "retrieve", "Retrieve"
+        CREATE = "create", "Create"
+        UPDATE = "update", "Update"
+        DELETE = "delete", "Delete"
+        CUSTOM = "custom", "Custom"
+
+    resource = models.ForeignKey(Resource, on_delete=models.CASCADE, related_name="api_operations")
+    key = models.CharField(max_length=20, choices=Key.choices)
+    method = models.CharField(max_length=10)
+    path = models.CharField(max_length=255)
+    title = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    parameters = models.JSONField(default=list, blank=True)
+    request_schema = models.JSONField(null=True, blank=True)
+    pagination = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["resource", "key", "path"]
+        constraints = [models.UniqueConstraint(fields=["resource", "key", "method", "path"], name="flux_api_operation_unique")]
+
+
+class ApiOperationResponse(models.Model):
+    operation = models.ForeignKey(ApiOperation, on_delete=models.CASCADE, related_name="responses")
+    status_code = models.PositiveSmallIntegerField()
+    description = models.TextField(blank=True)
+    projection = models.ForeignKey(ApiProjection, on_delete=models.SET_NULL, null=True, blank=True, related_name="operation_responses")
+
+    class Meta:
+        ordering = ["operation", "status_code"]
+        constraints = [models.UniqueConstraint(fields=["operation", "status_code"], name="flux_api_operation_response_unique")]
+
+
+class Provider(models.Model):
+    """A generated frontend data boundary for selected entities and API resources."""
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="providers")
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    # Retained only for staged removal after existing selections are migrated.
+    entities = models.ManyToManyField(Entity, blank=True, related_name="legacy_providers")
+    resources = models.ManyToManyField(Resource, blank=True, related_name="providers")
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [models.UniqueConstraint(fields=["project", "name"], name="flux_provider_unique_name_per_project")]
+
+    def __str__(self):
+        return self.name
 
 
 class Role(models.Model):
@@ -76,18 +152,20 @@ class RolePermission(models.Model):
         MEMBER = "member", "Member"
 
     role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="permissions")
-    resource = models.ForeignKey(Resource, on_delete=models.CASCADE, related_name="role_permissions")
-    operation = models.CharField(max_length=20, choices=Resource.Operation.choices)
+    # ``operation`` stores the legacy key. The nullable FK avoids casting it
+    # directly to bigint while legacy rows are converted.
+    operation = models.CharField(max_length=20, blank=True)
+    api_operation = models.ForeignKey(ApiOperation, on_delete=models.CASCADE, related_name="role_permissions", null=True, blank=True)
     scope = models.CharField(max_length=20, choices=Scope.choices, default=Scope.ALL)
 
     class Meta:
-        ordering = ["role", "resource", "operation"]
+        ordering = ["role", "api_operation"]
         constraints = [
-            models.UniqueConstraint(fields=["role", "resource", "operation"], name="flux_rolepermission_unique")
+            models.UniqueConstraint(fields=["role", "api_operation"], name="flux_rolepermission_api_operation_unique")
         ]
 
     def __str__(self):
-        return f"{self.role} {self.operation} {self.resource} ({self.scope})"
+        return f"{self.role} {self.api_operation or self.operation} ({self.scope})"
 
 
 class Screen(models.Model):
@@ -156,6 +234,9 @@ class IntegrationOperation(models.Model):
     class Method(models.TextChoices):
         GET = "GET", "GET"
         POST = "POST", "POST"
+        PUT = "PUT", "PUT"
+        PATCH = "PATCH", "PATCH"
+        DELETE = "DELETE", "DELETE"
 
     class BodyFormat(models.TextChoices):
         JSON = "json", "JSON"
@@ -170,7 +251,7 @@ class IntegrationOperation(models.Model):
     integration = models.ForeignKey(Integration, on_delete=models.CASCADE, related_name="operations")
     name = models.CharField(max_length=60, help_text="Python identifier used for the generated function.")
     description = models.TextField(blank=True)
-    method = models.CharField(max_length=4, choices=Method.choices, default=Method.GET)
+    method = models.CharField(max_length=6, choices=Method.choices, default=Method.GET)
     path = models.CharField(max_length=300, help_text="Path relative to base_url; {param} marks path parameters.")
     body_format = models.CharField(max_length=4, choices=BodyFormat.choices, default=BodyFormat.JSON)
     params = models.JSONField(default=list, blank=True, help_text="[{name, in, type, required, default, description}]")

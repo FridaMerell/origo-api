@@ -6,11 +6,48 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from accounts.serializers import UserSerializer
-from flux.models import Document, Milestone, Project, Tag, Task, Update
+from flux.models import (
+    ApiProjection,
+    ApiOperation,
+    ApiOperationResponse,
+    Document,
+    Entity,
+    Field,
+    Integration,
+    IntegrationOperation,
+    Milestone,
+    Project,
+    Provider,
+    Relation,
+    Resource,
+    Role,
+    RolePermission,
+    Screen,
+    SeedRow,
+    StackProfile,
+    Tag,
+    Task,
+    Update,
+)
 from flux.serializers import (
+    ApiProjectionSerializer,
+    ApiOperationSerializer,
+    ApiOperationResponseSerializer,
     DocumentSerializer,
+    EntitySerializer,
+    FieldSerializer,
+    IntegrationOperationSerializer,
+    IntegrationSerializer,
     MilestoneSerializer,
     ProjectSerializer,
+    ProviderSerializer,
+    RelationSerializer,
+    ResourceSerializer,
+    RolePermissionSerializer,
+    RoleSerializer,
+    ScreenSerializer,
+    SeedRowSerializer,
+    StackProfileSerializer,
     TaskSerializer,
     UpdateSerializer,
 )
@@ -142,4 +179,54 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 documents, many=True, context=serializer_context
             ).data,
             'users': UserSerializer(users, many=True, context=serializer_context).data,
+        })
+
+    @action(detail=True, methods=['get'], url_path='design')
+    def design(self, request, pk=None):
+        """One authoritative, ID-preserving design graph for the frontend."""
+        project = self.get_object()
+        context = {'request': request}
+        return Response({
+            'project_id': project.id,
+            'entities': EntitySerializer(
+                Entity.objects.filter(project=project), many=True, context=context
+            ).data,
+            'fields': FieldSerializer(
+                Field.objects.filter(entity__project=project), many=True, context=context
+            ).data,
+            'relations': RelationSerializer(
+                Relation.objects.filter(source__project=project), many=True, context=context
+            ).data,
+            'stack_profile': StackProfileSerializer(
+                StackProfile.objects.filter(project=project).first(), context=context
+            ).data if StackProfile.objects.filter(project=project).exists() else None,
+            'resources': ResourceSerializer(
+                Resource.objects.filter(entity__project=project), many=True, context=context
+            ).data,
+            'api_operations': ApiOperationSerializer(
+                ApiOperation.objects.filter(resource__entity__project=project), many=True, context=context
+            ).data,
+            'api_projections': ApiProjectionSerializer(
+                ApiProjection.objects.filter(project=project), many=True, context=context
+            ).data,
+            'api_operation_responses': ApiOperationResponseSerializer(
+                ApiOperationResponse.objects.filter(operation__resource__entity__project=project), many=True, context=context
+            ).data,
+            'providers': ProviderSerializer(
+                Provider.objects.filter(project=project), many=True, context=context
+            ).data,
+            'roles': RoleSerializer(Role.objects.filter(project=project), many=True, context=context).data,
+            'role_permissions': RolePermissionSerializer(
+                RolePermission.objects.filter(role__project=project), many=True, context=context
+            ).data,
+            'screens': ScreenSerializer(Screen.objects.filter(project=project), many=True, context=context).data,
+            'integrations': IntegrationSerializer(
+                Integration.objects.filter(project=project), many=True, context=context
+            ).data,
+            'integration_operations': IntegrationOperationSerializer(
+                IntegrationOperation.objects.filter(integration__project=project), many=True, context=context
+            ).data,
+            'seed_rows': SeedRowSerializer(
+                SeedRow.objects.filter(entity__project=project), many=True, context=context
+            ).data,
         })

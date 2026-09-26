@@ -2,6 +2,17 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from flux.views import (
+    ApiProjectionViewSet,
+    ApiOperationViewSet,
+    ApiOperationResponseViewSet,
+    CodexProjectApiProjectionCollectionView,
+    CodexProjectApiProjectionDetailView,
+    CodexProjectApiOperationCollectionView,
+    CodexProjectApiOperationDetailView,
+    CodexProjectApiOperationResponseCollectionView,
+    CodexProjectApiOperationResponseDetailView,
+    CodexProjectProviderCollectionView,
+    CodexProjectProviderDetailView,
     CodexIdentityListView,
     CodexProjectDocumentUpdateView,
     CodexProjectEntityUpdateView,
@@ -23,6 +34,7 @@ from flux.views import (
     IntegrationViewSet,
     MilestoneViewSet,
     ProjectViewSet,
+    ProviderViewSet,
     RelationViewSet,
     ResourceViewSet,
     RolePermissionViewSet,
@@ -49,6 +61,10 @@ router.register('fields', FieldViewSet, basename='field')
 router.register('relations', RelationViewSet, basename='relation')
 router.register('stack-profiles', StackProfileViewSet, basename='stack-profile')
 router.register('resources', ResourceViewSet, basename='resource')
+router.register('api-projections', ApiProjectionViewSet, basename='api-projection')
+router.register('api-operations', ApiOperationViewSet, basename='api-operation')
+router.register('api-operation-responses', ApiOperationResponseViewSet, basename='api-operation-response')
+router.register('providers', ProviderViewSet, basename='provider')
 router.register('roles', RoleViewSet, basename='role')
 router.register('role-permissions', RolePermissionViewSet, basename='role-permission')
 router.register('screens', ScreenViewSet, basename='screen')
@@ -65,6 +81,14 @@ urlpatterns = [
     path('codex/projects/', CodexProjectPlanListView.as_view(), name='codex-project-list'),
     path('codex/projects/<int:project_id>/', CodexProjectPlanDetailView.as_view(), name='codex-project-detail'),
     path('codex/projects/<int:project_id>/plan/', CodexProjectPlanAppendView.as_view(), name='codex-project-plan-append'),
+    path('codex/projects/<int:project_id>/api-projections/', CodexProjectApiProjectionCollectionView.as_view(), name='codex-project-api-projection-create'),
+    path('codex/projects/<int:project_id>/api-projections/<int:projection_id>/', CodexProjectApiProjectionDetailView.as_view(), name='codex-project-api-projection-detail'),
+    path('codex/projects/<int:project_id>/api-operations/', CodexProjectApiOperationCollectionView.as_view(), name='codex-project-api-operation-create'),
+    path('codex/projects/<int:project_id>/api-operations/<int:operation_id>/', CodexProjectApiOperationDetailView.as_view(), name='codex-project-api-operation-detail'),
+    path('codex/projects/<int:project_id>/api-operation-responses/', CodexProjectApiOperationResponseCollectionView.as_view(), name='codex-project-api-operation-response-create'),
+    path('codex/projects/<int:project_id>/api-operation-responses/<int:response_id>/', CodexProjectApiOperationResponseDetailView.as_view(), name='codex-project-api-operation-response-detail'),
+    path('codex/projects/<int:project_id>/providers/', CodexProjectProviderCollectionView.as_view(), name='codex-project-provider-create'),
+    path('codex/projects/<int:project_id>/providers/<int:provider_id>/', CodexProjectProviderDetailView.as_view(), name='codex-project-provider-detail'),
     path('codex/projects/<int:project_id>/entities/<int:entity_id>/', CodexProjectEntityUpdateView.as_view(), name='codex-project-entity-update'),
     path('codex/projects/<int:project_id>/entities/<int:entity_id>/fields/', CodexProjectEntityFieldUpsertView.as_view(), name='codex-project-entity-field-upsert'),
     path('codex/projects/<int:project_id>/entities/<int:entity_id>/fields/<int:field_id>/', CodexProjectEntityFieldUpsertView.as_view(), name='codex-project-entity-field-delete'),

@@ -1,6 +1,6 @@
 """Repository skeleton target: README, env, Docker, CI and base project files."""
 
-from .common import app_label, namespace
+from .common import api_projections_markdown, app_label, namespace
 from .identity_gen import styleguide
 
 _DB_URLS = {
@@ -388,6 +388,8 @@ def generate(spec):
     ]
     if spec.get("identity"):
         files.append({"path": "identity/STYLEGUIDE.md", "content": styleguide(spec)})
+    if spec.get("api_projections"):
+        files.append({"path": "API_PROJECTIONS.md", "content": api_projections_markdown(spec)})
     backend = _backend(spec)
     if backend:
         files.append({"path": "Dockerfile", "content": dockerfile(spec)})

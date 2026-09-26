@@ -1,6 +1,14 @@
 """Flux views, organised by domain to match ``flux.serializers``."""
 
 from .codex import (
+    CodexProjectApiProjectionCollectionView,
+    CodexProjectApiProjectionDetailView,
+    CodexProjectApiOperationCollectionView,
+    CodexProjectApiOperationDetailView,
+    CodexProjectApiOperationResponseCollectionView,
+    CodexProjectApiOperationResponseDetailView,
+    CodexProjectProviderCollectionView,
+    CodexProjectProviderDetailView,
     CodexIdentityListView,
     CodexProjectDocumentUpdateView,
     CodexProjectEntityUpdateView,
@@ -18,8 +26,12 @@ from .codex import (
 )
 from .datamodel import EntityViewSet, FieldViewSet, RelationViewSet
 from .design import (
+    ApiProjectionViewSet,
+    ApiOperationResponseViewSet,
+    ApiOperationViewSet,
     IntegrationOperationViewSet,
     IntegrationViewSet,
+    ProviderViewSet,
     ResourceViewSet,
     RolePermissionViewSet,
     RoleViewSet,
@@ -37,8 +49,19 @@ from .timeline import TimelineView
 from .updates import UpdateViewSet
 
 __all__ = [
+    "CodexProjectApiProjectionCollectionView",
+    "CodexProjectApiProjectionDetailView",
+    "CodexProjectApiOperationCollectionView",
+    "CodexProjectApiOperationDetailView",
+    "CodexProjectApiOperationResponseCollectionView",
+    "CodexProjectApiOperationResponseDetailView",
+    "CodexProjectProviderCollectionView",
+    "CodexProjectProviderDetailView",
     "CodexIdentityListView",
     "CodexProjectDocumentUpdateView",
+    "ApiProjectionViewSet",
+    "ApiOperationViewSet",
+    "ApiOperationResponseViewSet",
     "CodexProjectEntityUpdateView",
     "CodexProjectEntityFieldUpsertView",
     "CodexProjectResourceUpdateView",
@@ -58,6 +81,7 @@ __all__ = [
     "IntegrationViewSet",
     "MilestoneViewSet",
     "ProjectViewSet",
+    "ProviderViewSet",
     "RelationViewSet",
     "ResourceViewSet",
     "RolePermissionViewSet",

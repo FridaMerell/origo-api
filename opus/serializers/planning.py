@@ -9,12 +9,13 @@ class WorkSerializer(serializers.ModelSerializer):
     contributors = WorkContributorSerializer(many=True, read_only=True)
     editions = serializers.SerializerMethodField()
     shelf_names = serializers.SerializerMethodField()
+    index = serializers.SerializerMethodField()
 
     class Meta:
         model = Work
         fields = [
             "id", "title", "year", "owner", "is_private", "shelves",
-            "contributors", "editions", "shelf_names", "created_at", "updated_at",
+            "contributors", "editions", "shelf_names", "index", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "owner", "created_at", "updated_at"]
 
@@ -34,6 +35,21 @@ class WorkSerializer(serializers.ModelSerializer):
 
     def get_shelf_names(self, obj):
         return [shelf.name for shelf in obj.shelves.all()]
+
+    def get_index(self, obj):
+        """Return the chapter index preloaded for a single-work retrieve."""
+
+        return [
+            {
+                "edition_id": edition.id,
+                "edition_title": edition.title,
+                "chapters": [
+                    {"id": chapter.id, "position": chapter.position, "label": chapter.label}
+                    for chapter in getattr(edition, "request_chapters", [])
+                ],
+            }
+            for edition in obj.editions.all()
+        ]
 
 
 class CreateWorkEditionSerializer(serializers.Serializer):
@@ -57,6 +73,16 @@ class CreateWorkWithEditionsSerializer(serializers.Serializer):
         if not editions:
             raise serializers.ValidationError("At least one edition is required.")
         return editions
+
+    def validate_author(self, author_name):
+        author_name = author_name.strip()
+        if (
+            author_name
+            and not self.context["request"].user.is_staff
+            and not Author.objects.filter(name__iexact=author_name).exists()
+        ):
+            raise serializers.ValidationError("Only a curator can add a new author to the shared catalogue.")
+        return author_name
 
     def create(self, validated_data):
         editions = validated_data.pop("editions")
@@ -125,9 +151,14 @@ class SourceFileSerializer(serializers.ModelSerializer):
 
 
 class TextUnitSerializer(serializers.ModelSerializer):
+    chapter = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = TextUnit
-        fields = ["id", "version", "parent", "kind", "position", "content", "label", "created_at", "updated_at"]
+        fields = [
+            "id", "version", "parent", "kind", "position", "content", "label", "chapter",
+            "created_at", "updated_at",
+        ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def validate_version(self, version):
@@ -138,8 +169,15 @@ class TextUnitSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         version = attrs.get("version") or getattr(self.instance, "version", None)
         parent = attrs.get("parent", getattr(self.instance, "parent", None))
+        kind = attrs.get("kind", getattr(self.instance, "kind", None))
         if parent is not None and version is not None and parent.version_id != version.pk:
             raise serializers.ValidationError({"parent": "Parent must belong to the same edition."})
+        if kind == TextUnit.Kind.CHAPTER and parent is not None:
+            raise serializers.ValidationError({"parent": "A chapter cannot have a parent."})
+        if kind == TextUnit.Kind.PARAGRAPH and parent is not None and parent.kind != TextUnit.Kind.CHAPTER:
+            raise serializers.ValidationError({"parent": "A paragraph parent must be a chapter."})
+        if kind == TextUnit.Kind.LINE and parent is not None and parent.kind != TextUnit.Kind.PARAGRAPH:
+            raise serializers.ValidationError({"parent": "A line parent must be a paragraph."})
         if parent is not None and self.instance is not None:
             ancestor = parent
             while ancestor is not None:
@@ -147,3 +185,9 @@ class TextUnitSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({"parent": "This would create a circular text hierarchy."})
                 ancestor = ancestor.parent
         return attrs
+
+    def get_chapter(self, obj):
+        chapter = obj if obj.kind == TextUnit.Kind.CHAPTER else obj.parent
+        if chapter is None or chapter.kind != TextUnit.Kind.CHAPTER:
+            return None
+        return {"id": chapter.id, "position": chapter.position, "label": chapter.label}

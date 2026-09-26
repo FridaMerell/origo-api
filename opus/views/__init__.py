@@ -18,7 +18,7 @@ from .people import (
     WorkContributorViewSet,
 )
 from .planning import EditionViewSet, ShelfViewSet, SourceFileViewSet, TextUnitViewSet, WorkViewSet
-from .status import ReadingStatusView
+from .status import ReadingView, WorkReadingProgressView
 
 __all__ = [
     "AlignmentSetViewSet",
@@ -41,5 +41,6 @@ __all__ = [
     "EditionViewSet",
     "WorkViewSet",
     "WorkContributorViewSet",
-    "ReadingStatusView",
+    "ReadingView",
+    "WorkReadingProgressView",
 ]

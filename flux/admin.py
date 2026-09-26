@@ -1,10 +1,14 @@
 from django.contrib import admin
 
 from flux.models import (
+    ApiProjection,
+    ApiOperation,
+    ApiOperationResponse,
     Entity,
     Field,
     Integration,
     IntegrationOperation,
+    Provider,
     Milestone,
     Project,
     Relation,
@@ -85,8 +89,32 @@ class StackProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Resource, site=site)
 class ResourceAdmin(admin.ModelAdmin):
-    list_display = ['path', 'entity', 'ordering']
+    list_display = ['path', 'entity', 'title']
     list_filter = ['entity__project']
+
+
+@admin.register(ApiProjection, site=site)
+class ApiProjectionAdmin(admin.ModelAdmin):
+    list_display = ['name', 'project']
+    list_filter = ['project']
+
+
+@admin.register(ApiOperation, site=site)
+class ApiOperationAdmin(admin.ModelAdmin):
+    list_display = ['title', 'resource', 'key', 'method', 'path']
+    list_filter = ['resource__entity__project', 'key', 'method']
+
+
+@admin.register(ApiOperationResponse, site=site)
+class ApiOperationResponseAdmin(admin.ModelAdmin):
+    list_display = ['operation', 'status_code', 'projection']
+
+
+@admin.register(Provider, site=site)
+class ProviderAdmin(admin.ModelAdmin):
+    list_display = ['name', 'project']
+    list_filter = ['project']
+    filter_horizontal = ['resources']
 
 
 @admin.register(Role, site=site)
@@ -97,8 +125,8 @@ class RoleAdmin(admin.ModelAdmin):
 
 @admin.register(RolePermission, site=site)
 class RolePermissionAdmin(admin.ModelAdmin):
-    list_display = ['role', 'resource', 'operation', 'scope']
-    list_filter = ['role__project', 'operation', 'scope']
+    list_display = ['role', 'api_operation', 'scope']
+    list_filter = ['role__project', 'api_operation', 'scope']
 
 
 @admin.register(Screen, site=site)
