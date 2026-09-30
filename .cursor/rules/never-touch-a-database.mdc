@@ -1,0 +1,14 @@
+---
+description: Never connect to, create, query, or modify a database
+alwaysApply: true
+---
+
+# Never touch a database
+
+Never connect to a database. Never run SQL. Never create, drop, migrate, seed, dump, or restore a database. Never change database users, passwords, grants, or permissions.
+
+`manage.py test` is forbidden. Django creates a test database, and a local test database does not verify Flux or any other live service.
+
+Also forbidden: `manage.py migrate`, `dbshell`, `dumpdata`, `loaddata`, `psql`, `mysql`, `sqlite3`, and any script or ORM session that opens a connection.
+
+Reading model and migration source files is allowed. The Flux Codex HTTP API is not permission to open a database.

@@ -824,16 +824,24 @@ def _append_design_to_project(project, user, plan, entities):
             SeedRow.objects.create(entity=entity, data=row, order=next_order + offset)
 
 
-def scaffold_private_project(user, project_id, target):
-    """Return generated ``[{path, content}]`` files for one target of a private project."""
+def scaffold_private_project(user, project_id, target, files=None):
+    """Return generated ``[{path, content}]`` files for one target of a private project.
+
+    ``files``, when given, narrows the result to just those paths — use it to fetch one file
+    instead of the whole target bundle.
+    """
     try:
         project = _private_projects_for(user).get(pk=project_id)
     except Project.DoesNotExist as exc:
         raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
     try:
-        return {'target': target, 'files': generate_files(build_spec(project), target)}
+        generated = generate_files(build_spec(project), target)
     except ScaffoldError as exc:
         raise CodexPlanError(str(exc)) from exc
+    if files:
+        wanted = set(files)
+        generated = [item for item in generated if item['path'] in wanted]
+    return {'target': target, 'files': generated}
 
 
 def import_project_plan_for_user(user, plan, *, return_project=False):
@@ -1313,6 +1321,76 @@ def update_role_in_private_project(user, project_id, role_id, payload):
             for permission in role.permissions.order_by('id')
         ],
     }
+
+
+def _serialize_screen(screen):
+    return {
+        'id': screen.id,
+        'name': screen.name,
+        'route': screen.route,
+        'description': screen.description,
+        'entity_ids': sorted(screen.entities.values_list('id', flat=True)),
+        'parent_id': screen.parent_id,
+    }
+
+
+def update_screen_in_private_project(user, project_id, screen_id, payload):
+    """Partially update one screen; a supplied ``entity_ids`` replaces its entities."""
+    if not isinstance(payload, dict):
+        raise CodexPlanError('screen must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+        screen = project.screens.get(pk=screen_id)
+    except (Project.DoesNotExist, Screen.DoesNotExist) as exc:
+        raise CodexPlanError('Screen not found in this private project.') from exc
+
+    update_fields = []
+    if 'name' in payload:
+        screen.name = _text(payload.get('name'), 'screen.name', required=True, maximum=100)
+        update_fields.append('name')
+    if 'route' in payload:
+        route = _text(payload.get('route'), 'screen.route', required=True)
+        if project.screens.exclude(pk=screen.pk).filter(route=route).exists():
+            raise CodexPlanError(f'Screen route already exists in this project: {route}.')
+        screen.route = route
+        update_fields.append('route')
+    if 'description' in payload:
+        screen.description = _text(payload.get('description'), 'screen.description', maximum=10000)
+        update_fields.append('description')
+    if 'parent_id' in payload:
+        parent_id = _optional_id(payload.get('parent_id'), 'parent_id')
+        parent = None
+        if parent_id is not None:
+            try:
+                parent = project.screens.get(pk=parent_id)
+            except Screen.DoesNotExist as exc:
+                raise CodexPlanError('parent_id must belong to this project.') from exc
+            ancestor = parent
+            while ancestor is not None:
+                if ancestor.pk == screen.pk:
+                    raise CodexPlanError('A screen cannot be its own ancestor.')
+                ancestor = ancestor.parent
+        screen.parent = parent
+        update_fields.append('parent')
+
+    entities = None
+    if 'entity_ids' in payload:
+        raw_ids = payload['entity_ids']
+        if not isinstance(raw_ids, list):
+            raise CodexPlanError('entity_ids must be a list of entity ids.')
+        entity_ids = {_optional_id(value, 'entity_ids') for value in raw_ids}
+        entities = list(project.entities.filter(pk__in=entity_ids))
+        if len(entities) != len(entity_ids):
+            raise CodexPlanError('entity_ids must all belong to this project.')
+
+    if not update_fields and entities is None:
+        raise CodexPlanError('Provide at least one of: name, route, description, parent_id, entity_ids.')
+    with transaction.atomic():
+        if update_fields:
+            screen.save(update_fields=update_fields)
+        if entities is not None:
+            screen.entities.set(entities)
+    return _serialize_screen(screen)
 
 
 def upsert_relations_to_private_project(user, project_id, payload):

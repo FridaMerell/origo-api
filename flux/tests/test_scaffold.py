@@ -150,6 +150,189 @@ class TypeScriptGeneratorTests(unittest.TestCase):
         self.assertIn('remove:', book)
         self.assertNotIn('update:', book)
 
+    def test_list_and_retrieve_use_react_cache_like_opus(self):
+        api = files_by_path(make_spec(), 'typescript')['api.ts']
+
+        self.assertIn('import { cache } from "react";', api)
+        self.assertIn('function cachedList<T, Filters extends Record<string, string | undefined>', api)
+        self.assertIn('function cachedRetrieve<T>(path: string) {', api)
+        self.assertIn('list: cachedList<Author, AuthorFilters>("/authors/"),', api)
+        self.assertIn('retrieve: cachedRetrieve<Author>("/authors/"),', api)
+
+    def test_list_without_filters_uses_the_default_filters_type(self):
+        api = files_by_path(make_spec(), 'typescript')['api.ts']
+
+        self.assertIn('list: cachedList<Book>("/books/"),', api)
+
+    def test_projection_type_handles_list_typed_json_schema(self):
+        spec = make_spec()
+        spec['api_projections'] = [{
+            'name': 'book_summary',
+            'schema': {
+                'type': 'object',
+                'required': ['id'],
+                'properties': {
+                    'id': {'type': 'integer'},
+                    'subtitle': {'type': ['string', 'null']},
+                    'tags': {'type': 'array', 'items': {'type': ['string', 'integer']}},
+                },
+            },
+        }]
+
+        files = files_by_path(spec, 'typescript')
+
+        self.assertIn('export type BookSummary = {', files['api-projections.ts'])
+        self.assertIn('subtitle?: string | null;', files['api-projections.ts'])
+        self.assertIn('tags?: Array<string | number>;', files['api-projections.ts'])
+
+    def test_projection_keys_that_are_not_valid_identifiers_are_quoted(self):
+        spec = make_spec()
+        spec['api_projections'] = [{
+            'name': 'weird',
+            'schema': {'type': 'object', 'properties': {'edition-id': {'type': 'integer'}}},
+        }]
+
+        projections = files_by_path(spec, 'typescript')['api-projections.ts']
+
+        self.assertIn('"edition-id": number;', projections)
+
+    def test_projections_are_a_separate_file_of_plain_compile_time_types(self):
+        spec = make_spec(resources=[])
+        spec['api_projections'] = [{'name': 'thing', 'schema': {'type': 'object', 'properties': {'id': {'type': 'integer'}}}}]
+
+        files = files_by_path(spec, 'typescript')
+
+        self.assertIn('api-projections.ts', files)
+        self.assertEqual(files['api-projections.ts'].strip(), 'export type Thing = {\n  id: number;\n};')
+        self.assertNotIn('apiProjections', files['api-projections.ts'])
+        self.assertNotIn('Thing', files['types.ts'])
+
+    def test_no_projections_file_without_any_projections(self):
+        self.assertNotIn('api-projections.ts', files_by_path(make_spec(), 'typescript'))
+
+    def test_properties_default_to_required_when_the_schema_has_no_required_list(self):
+        spec = make_spec(resources=[])
+        spec['api_projections'] = [{
+            'name': 'thing',
+            'schema': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}}},
+        }]
+
+        projections = files_by_path(spec, 'typescript')['api-projections.ts']
+
+        self.assertIn('id: number;', projections)
+        self.assertIn('name: string;', projections)
+
+    def test_an_explicit_required_list_is_respected_even_when_empty(self):
+        spec = make_spec(resources=[])
+        spec['api_projections'] = [{
+            'name': 'thing',
+            'schema': {'type': 'object', 'required': [], 'properties': {'id': {'type': 'integer'}}},
+        }]
+
+        projections = files_by_path(spec, 'typescript')['api-projections.ts']
+
+        self.assertIn('id?: number;', projections)
+
+
+class CustomOperationTests(unittest.TestCase):
+    def custom_spec(self, **operation_overrides):
+        spec = make_spec()
+        spec['api_projections'] = [{'name': 'reading_window', 'schema': {'type': 'object', 'properties': {'position': {'type': 'integer'}}}}]
+        operation = {
+            'resource': 'Book', 'key': 'custom', 'method': 'POST', 'path': '/books/create-with-editions/',
+            'title': 'Create work with editions', 'description': '', 'parameters': [],
+            'request_schema': {'type': 'object', 'properties': {'title': {'type': 'string'}}}, 'pagination': None,
+            'responses': [{'status_code': 201, 'description': '', 'projection': 'reading_window'}],
+        }
+        operation.update(operation_overrides)
+        spec['api_operations'] = [operation]
+        return spec
+
+    def test_a_mutation_becomes_a_plain_named_function_like_opus(self):
+        api = files_by_path(self.custom_spec(), 'typescript')['api.ts']
+
+        self.assertIn("import type { ReadingWindow } from './api-projections';", api)
+        self.assertIn('export async function createWorkWithEditions(data: {\n  title: string;\n}): Promise<ReadingWindow> {', api)
+        self.assertIn('return request<ReadingWindow>("/books/create-with-editions/", { method: "POST", body: JSON.stringify(data) });', api)
+
+    def test_a_get_operation_is_cached_and_substitutes_path_params(self):
+        spec = self.custom_spec(
+            method='GET', path='/books/{book_id}/reading-window/', title='Get reading window',
+            parameters=[{'name': 'book_id', 'in': 'path', 'type': 'integer', 'required': True}],
+            request_schema=None,
+        )
+
+        api = files_by_path(spec, 'typescript')['api.ts']
+
+        self.assertIn(
+            'export const getReadingWindow = cache((bookId: number): Promise<ReadingWindow> => '
+            'request<ReadingWindow>(`/books/${encodeURIComponent(String(bookId))}/reading-window/`));',
+            api,
+        )
+
+    def test_get_query_params_use_with_query(self):
+        spec = self.custom_spec(
+            method='GET', path='/books/search/', title='Search books',
+            parameters=[{'name': 'q', 'in': 'query', 'type': 'string'}], request_schema=None,
+        )
+
+        api = files_by_path(spec, 'typescript')['api.ts']
+
+        self.assertIn('params: Record<string, string | undefined> = {}', api)
+        self.assertIn('withQuery("/books/search/", params)', api)
+
+    def test_no_projection_falls_back_to_unknown(self):
+        spec = self.custom_spec(responses=[])
+
+        api = files_by_path(spec, 'typescript')['api.ts']
+
+        self.assertIn('Promise<unknown>', api)
+        self.assertNotIn("from './api-projections'", api)
+
+    def test_non_custom_operations_do_not_generate_a_function(self):
+        spec = self.custom_spec(key='list')
+
+        api = files_by_path(spec, 'typescript')['api.ts']
+
+        self.assertNotIn('createWorkWithEditions', api)
+
+    def test_no_custom_operations_means_no_extra_functions(self):
+        api = files_by_path(make_spec(), 'typescript')['api.ts']
+
+        self.assertNotIn('createWorkWithEditions', api)
+
+
+class ProviderGeneratorTests(unittest.TestCase):
+    def test_provider_holds_fetched_data_not_api_functions(self):
+        spec = make_spec()
+        spec['providers'] = [{'name': 'Library', 'resources': ['Author', 'Book']}]
+
+        provider = files_by_path(spec, 'typescript')['providers/library-provider.tsx']
+
+        self.assertIn('"use client";', provider)
+        self.assertIn('import type { Author, Book } from "../types";', provider)
+        self.assertIn('type LibraryData = {', provider)
+        self.assertIn('authors: Author[];', provider)
+        self.assertIn('books: Book[];', provider)
+        self.assertIn('const EMPTY_DATA: LibraryData = {', provider)
+        self.assertIn('export function LibraryDataProvider({', provider)
+        self.assertIn('  children,\n  ...data', provider)
+        self.assertIn('<LibraryContext.Provider value={data}>{children}</LibraryContext.Provider>', provider)
+        self.assertIn('export function useAuthors() {', provider)
+        self.assertIn('export function useBooks() {', provider)
+        self.assertNotIn('Api', provider)
+
+    def test_unknown_resources_in_a_provider_are_skipped(self):
+        spec = make_spec()
+        spec['providers'] = [{'name': 'Ghost', 'resources': ['Nonexistent']}]
+
+        self.assertNotIn('providers/ghost-provider.tsx', files_by_path(spec, 'typescript'))
+
+    def test_no_providers_without_a_provider_spec(self):
+        files = files_by_path(make_spec(), 'typescript')
+
+        self.assertFalse([path for path in files if path.startswith('providers/')])
+
     def test_routes_file_needs_screens(self):
         self.assertNotIn('routes.ts', files_by_path(make_spec(), 'typescript'))
 

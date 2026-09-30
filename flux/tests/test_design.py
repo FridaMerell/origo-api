@@ -199,6 +199,28 @@ class DesignApiTests(APITestCase):
         self.assertEqual([item['path'] for item in response.data['files']], ['book_club/models.py'])
         self.assertIn('class Book(models.Model):', response.data['files'][0]['content'])
 
+    def test_scaffold_files_param_narrows_the_response(self):
+        all_files = self.client.get(f'/api/flux/projects/{self.project.pk}/scaffold/?target=skeleton')
+        self.assertGreater(len(all_files.data['files']), 1)
+
+        response = self.client.get(f'/api/flux/projects/{self.project.pk}/scaffold/?target=skeleton&files=README.md')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['path'] for item in response.data['files']], ['README.md'])
+
+    def test_scaffold_files_param_accepts_several_comma_separated_paths(self):
+        response = self.client.get(
+            f'/api/flux/projects/{self.project.pk}/scaffold/?target=skeleton&files=README.md,.gitignore'
+        )
+
+        self.assertEqual(sorted(item['path'] for item in response.data['files']), ['.gitignore', 'README.md'])
+
+    def test_scaffold_files_param_with_no_match_returns_an_empty_list(self):
+        response = self.client.get(f'/api/flux/projects/{self.project.pk}/scaffold/?target=skeleton&files=nope.txt')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['files'], [])
+
     def test_scaffold_rejects_an_unknown_target(self):
         response = self.client.get(f'/api/flux/projects/{self.project.pk}/scaffold/?target=rust')
 

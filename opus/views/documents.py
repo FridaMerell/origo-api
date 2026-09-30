@@ -47,7 +47,7 @@ class BookmarkViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return visible_to_user(
-            Bookmark.objects.filter(user=self.request.user).select_related("version__work"),
+            Bookmark.objects.filter(user=self.request.user).select_related("version__work", "unit__parent"),
             self.request.user,
             "version__work__",
         )
