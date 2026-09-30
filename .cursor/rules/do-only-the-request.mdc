@@ -1,0 +1,18 @@
+---
+description: Follow AGENTS.md. Never use git. Never touch a database.
+alwaysApply: true
+---
+
+# Follow the repository instructions
+
+`AGENTS.md` stays in force. Follow it the same way it is written. Do not delete, weaken, or override its Flux rules. Keeping the private Flux project current, updating the affected design artifacts, and implementing a missing safe Codex update operation are part of that instruction.
+
+## Hard bans
+
+Never run git. Never commit, push, pull, or create a pull request.
+
+Never connect to a database. Never run SQL. Never run `manage.py test` or any other command that creates a database.
+
+## Screen
+
+A screen is a frontend view. When a screen is affected, update it as a frontend view. Do not store backend contracts or API operations on it.

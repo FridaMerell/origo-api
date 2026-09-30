@@ -89,6 +89,44 @@ class AlignmentMember(models.Model):
         ]
 
 
+class AlignmentGap(models.Model):
+    """Empty cells in one edition's column, directly above one paragraph.
+
+    The parallel grid is derived, not stored: each edition contributes its paragraphs in order
+    and only the edits are persisted. A gap pushes the paragraph it precedes (and everything
+    after it) one row down in that edition.
+    """
+
+    alignment_version = models.ForeignKey(AlignmentVersion, on_delete=models.CASCADE, related_name="gaps")
+    before_unit = models.ForeignKey(TextUnit, on_delete=models.CASCADE, related_name="alignment_gaps")
+    count = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ["alignment_version", "before_unit", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["alignment_version", "before_unit"], name="opus_alignment_gap_unique"),
+            models.CheckConstraint(condition=models.Q(count__gte=1), name="opus_alignment_gap_count_positive"),
+        ]
+
+
+class AlignmentSpan(models.Model):
+    """One cell that covers several consecutive paragraphs of one edition.
+
+    Paragraphs without a span are cells of their own. ``start_unit`` and ``end_unit`` are
+    inclusive and ordered by ``(position, id)`` within the edition.
+    """
+
+    alignment_version = models.ForeignKey(AlignmentVersion, on_delete=models.CASCADE, related_name="spans")
+    start_unit = models.ForeignKey(TextUnit, on_delete=models.CASCADE, related_name="alignment_span_starts")
+    end_unit = models.ForeignKey(TextUnit, on_delete=models.CASCADE, related_name="alignment_span_ends")
+
+    class Meta:
+        ordering = ["alignment_version", "start_unit", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["alignment_version", "start_unit"], name="opus_alignment_span_unique"),
+        ]
+
+
 class Alignment(models.Model):
     """A range-to-range correspondence between two editions."""
 

@@ -25,6 +25,7 @@ from flux.codex_plans import (
     update_entity_in_private_project,
     update_resource_in_private_project,
     update_role_in_private_project,
+    update_screen_in_private_project,
     update_document_in_private_project,
     create_api_projection_in_private_project,
     update_api_projection_in_private_project,
@@ -218,8 +219,12 @@ class CodexProjectScaffoldView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, project_id):
+        files = request.query_params.get('files')
         try:
-            result = scaffold_private_project(request.user, project_id, request.query_params.get('target', ''))
+            result = scaffold_private_project(
+                request.user, project_id, request.query_params.get('target', ''),
+                files=files.split(',') if files else None,
+            )
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
@@ -510,6 +515,20 @@ class CodexProjectRoleUpdateView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(role)
+
+
+class CodexProjectScreenUpdateView(APIView):
+    """Partially update one screen in a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, screen_id):
+        try:
+            screen = update_screen_in_private_project(request.user, project_id, screen_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(screen)
 
 
 class CodexProjectRelationsView(APIView):

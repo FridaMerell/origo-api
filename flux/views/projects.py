@@ -82,6 +82,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             files = generate_files(build_spec(self.get_object()), target)
         except ScaffoldError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        requested = request.query_params.get('files')
+        if requested:
+            wanted = set(requested.split(','))
+            files = [item for item in files if item['path'] in wanted]
         return Response({'target': target, 'files': files})
 
     @action(detail=True, methods=['post'], url_path='scaffold-document')
