@@ -3,13 +3,25 @@ from rest_framework.response import Response
 
 from opus.access import visible_to_user
 from opus.models import Bookmark, Excerpt, ReadingProgress
-from opus.serializers import BookmarkSerializer, ExcerptSerializer, ReadingProgressSerializer
+from opus.serializers import (
+    BookmarkSerializer,
+    ExcerptSerializer,
+    ReadingProgressOverviewSerializer,
+    ReadingProgressSerializer,
+)
 
 
 class ReadingProgressViewSet(viewsets.ModelViewSet):
     serializer_class = ReadingProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = {"user": ["exact"], "work": ["exact"], "position": ["exact", "gte", "lte"]}
+
+    def get_serializer_class(self):
+        # Reading where each position points costs a few queries per row: only for the overview
+        # reads, never for the frequent position saves.
+        if self.action in ("list", "retrieve"):
+            return ReadingProgressOverviewSerializer
+        return ReadingProgressSerializer
 
     def get_queryset(self):
         return visible_to_user(

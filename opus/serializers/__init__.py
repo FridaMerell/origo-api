@@ -8,7 +8,12 @@ from .alignment import (
     AlignmentVersionSerializer,
 )
 from .annotations import AnnotationSerializer
-from .documents import BookmarkSerializer, ExcerptSerializer, ReadingProgressSerializer
+from .documents import (
+    BookmarkSerializer,
+    ExcerptSerializer,
+    ReadingProgressOverviewSerializer,
+    ReadingProgressSerializer,
+)
 from .lexicon import LexicalEntrySerializer
 from .people import (
     AuthorAliasSerializer,
@@ -42,6 +47,7 @@ __all__ = [
     "ExcerptSerializer",
     "DocumentUploadSerializer",
     "LexicalEntrySerializer",
+    "ReadingProgressOverviewSerializer",
     "ReadingProgressSerializer",
     "ShelfSerializer",
     "SourceFileSerializer",
