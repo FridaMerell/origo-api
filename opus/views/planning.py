@@ -20,10 +20,12 @@ from opus.serializers import (
 )
 from opus.services.importing import (
     DocumentImportError,
+    add_empty_chapter,
     append_document,
     document_preview,
     extract_document,
     import_document,
+    reorder_chapters,
 )
 from opus.services.importing import MAX_FILE_SIZE
 from opus.services.alignment_grid import release_unit
@@ -158,19 +160,71 @@ class EditionViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def append_document(self, request, pk=None):
-        """Add an upload's chapters after the edition's existing text (e.g. one more chapter)."""
+        """Add an upload's chapters to the edition: at the end, or before chapter ``before``."""
         edition = self.get_object()
         payload, error = self._validated_upload(request)
         if error:
             return error
         uploaded_file = payload.validated_data["file"]
         label = payload.validated_data["label"]
+        before = self._chapter(edition, payload.validated_data["before"])
         try:
             extracted = extract_document(uploaded_file, **payload.extract_options())
-            source_file, paragraph_count = append_document(edition, extracted=extracted, label=label)
+            source_file, paragraph_count = append_document(edition, extracted=extracted, label=label, before=before)
         except DocumentImportError as exc:
             return self._import_error("invalid_document", str(exc))
         return self._imported(edition, uploaded_file, extracted, label, source_file, paragraph_count)
+
+    @action(detail=True, methods=["post"], url_path="chapters", permission_classes=[permissions.IsAuthenticated])
+    def add_chapter(self, request, pk=None):
+        """Add a named chapter without text (``label``), at the end or before chapter ``before`` -
+        a placeholder for one this edition lacks, so the chapters after it keep their place."""
+        edition = self.get_object()
+        label = str(request.data.get("label") or "").strip()
+        if not label:
+            raise ValidationError({"label": "A chapter name is required."})
+        if len(label) > 255:
+            raise ValidationError({"label": "At most 255 characters."})
+        before_id = request.data.get("before")
+        add_empty_chapter(edition, label, before=self._chapter(edition, before_id if before_id != "" else None))
+        return Response({"chapters": self._chapters(edition)}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="reorder-chapters", permission_classes=[permissions.IsAuthenticated])
+    def reorder_chapters(self, request, pk=None):
+        """Put the edition's chapters in the order of ``chapter_ids``; their text moves with them."""
+        edition = self.get_object()
+        chapter_ids = request.data.get("chapter_ids")
+        if not isinstance(chapter_ids, list) or not all(isinstance(value, int) for value in chapter_ids):
+            raise ValidationError({"chapter_ids": "A list of chapter ids is required."})
+        try:
+            reorder_chapters(edition, chapter_ids)
+        except DocumentImportError as exc:
+            raise ValidationError({"chapter_ids": str(exc)})
+        return Response({"chapters": self._chapters(edition)})
+
+    @staticmethod
+    def _chapter(edition, chapter_id):
+        """The edition's top-level chapter ``chapter_id``, or ``None`` when no id is given."""
+        if chapter_id is None:
+            return None
+        try:
+            chapter_id = int(chapter_id)
+        except (TypeError, ValueError):
+            raise ValidationError({"before": "A chapter id is required."})
+        chapter = TextUnit.objects.filter(
+            pk=chapter_id, version=edition, kind=TextUnit.Kind.CHAPTER, parent__isnull=True
+        ).first()
+        if chapter is None:
+            raise ValidationError({"before": "The chapter does not belong to this edition."})
+        return chapter
+
+    @staticmethod
+    def _chapters(edition):
+        return list(
+            TextUnit.objects.filter(version=edition, kind=TextUnit.Kind.CHAPTER, parent__isnull=True)
+            .order_by("position", "id")
+            .values("id", "position", "label")
+        )
 
     @staticmethod
     def _imported(edition, uploaded_file, extracted, label, source_file, paragraph_count):

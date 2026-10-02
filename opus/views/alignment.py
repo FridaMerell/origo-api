@@ -2,7 +2,7 @@ import re
 import unicodedata
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -26,7 +26,7 @@ from opus.serializers import (
     AlignmentSetSerializer,
     AlignmentVersionSerializer,
 )
-from opus.services.alignment_grid import GAP, Grid, GridError, reset as reset_alignment
+from opus.services.alignment_grid import GAP, TEXT, Grid, GridError, reset as reset_alignment
 from .status import reading_unit_payload
 
 DEFAULT_WINDOW = 10
@@ -92,6 +92,11 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
 
     grid = Grid(alignment_set)
     total_rows = grid.total_rows
+    # The window is always one whole book page: the page holding row ``offset``. Pages break
+    # at every chapter of the reference edition, so a chapter always starts on a new page.
+    pages = grid.pages(limit)
+    first, end = next(((a, b) for a, b in pages if a <= offset < b), pages[-1] if pages else (0, 0))
+    offset, limit = first, end - first
     rows_range = range(offset, min(offset + limit, total_rows))
 
     wanted = {}
@@ -110,6 +115,14 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
         annotations.setdefault(annotation.unit_id, []).append(annotation)
     for unit in units.values():
         unit.request_annotations = annotations.get(unit.id, [])
+    chapter_starts, empty_before = _chapter_markers(grid, rows_range, units)
+
+    def unit_payload(unit_id):
+        payload = reading_unit_payload(units[unit_id])
+        starts = unit_id in chapter_starts
+        payload["starts_chapter"] = starts
+        payload["empty_chapters_before"] = empty_before.get(units[unit_id].parent_id, []) if starts else []
+        return payload
 
     rows = []
     for row in rows_range:
@@ -124,7 +137,7 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
                 {
                     "alignment_version": column.version.id,
                     "kind": kind,
-                    "units": [reading_unit_payload(units[unit_id]) for unit_id in ids],
+                    "units": [unit_payload(unit_id) for unit_id in ids],
                 }
             )
         rows.append({"row": row, "cells": cells})
@@ -135,8 +148,59 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
         "total_rows": total_rows,
         "offset": offset,
         "has_more": offset + limit < total_rows,
+        # First row of every page, in order; the reader's pager pages through these.
+        "pages": [page_first for page_first, _ in pages],
         "rows": rows,
     }
+
+
+def _chapter_markers(grid, rows_range, units):
+    """Where chapters begin in the visible rows, for headings in the reader.
+
+    Returns the ids of visible paragraphs that open a chapter (the paragraph before them, in
+    their edition's reading order, belongs to another chapter or there is none) and, per
+    chapter, the labels of chapters without text placed directly ahead of it - placeholders
+    for chapters an edition lacks, shown above the next chapter that has text.
+    """
+
+    previous = {}
+    for column in grid.columns:
+        for row in rows_range:
+            if row >= len(column.cells) or column.cells[row][0] != TEXT:
+                continue
+            _, first, last = column.cells[row]
+            for index in range(first, last + 1):
+                previous[column.paragraph_ids[index]] = column.paragraph_ids[index - 1] if index > 0 else None
+    parent_of = dict(
+        TextUnit.objects.filter(id__in={pid for pid in previous.values() if pid is not None}).values_list(
+            "id", "parent_id"
+        )
+    )
+    starts = {
+        unit_id
+        for unit_id, before in previous.items()
+        if units[unit_id].parent_id is not None and (before is None or parent_of.get(before) != units[unit_id].parent_id)
+    }
+
+    empty_before = {}
+    chapters = (
+        TextUnit.objects.filter(
+            version_id__in=[column.version.text_version_id for column in grid.columns],
+            kind=TextUnit.Kind.CHAPTER,
+            parent__isnull=True,
+        )
+        .annotate(paragraphs=Count("children"))
+        .order_by("version_id", "position", "id")
+    )
+    pending, edition = [], None
+    for chapter in chapters:
+        if chapter.version_id != edition:
+            pending, edition = [], chapter.version_id
+        if chapter.paragraphs == 0:
+            pending.append(chapter.label)
+        else:
+            empty_before[chapter.id], pending = pending, []
+    return starts, empty_before
 
 
 def _normalise_label(label):
@@ -200,14 +264,14 @@ class AlignmentSetViewSet(viewsets.ModelViewSet):
             if column is not None:
                 focus_row = grid.row_for_unit(column.version.id, unit_id)
                 if focus_row is not None:
-                    offset = max(0, focus_row - 3)
+                    offset = focus_row  # the payload opens the page that holds it
         elif request.query_params.get("focus") == "reading" and alignment_set.work_id:
             # Open where the user last was: the row of their saved reading position.
             progress = ReadingProgress.objects.filter(user=request.user, work_id=alignment_set.work_id).first()
             if progress is not None:
                 focus_row = Grid(alignment_set).row_at_position(progress.position)
                 if focus_row is not None:
-                    offset = max(0, focus_row - 3)  # a little context above the row itself
+                    offset = focus_row  # the payload opens the page that holds it
         payload = alignment_matrix_payload(alignment_set, request.user, offset, limit)
         if focus_row is not None:
             payload["focus_row"] = focus_row
@@ -224,7 +288,7 @@ class AlignmentSetViewSet(viewsets.ModelViewSet):
             except GridError as exc:
                 raise ValidationError({"detail": str(exc)})
             if result and "row" in result:
-                offset = result["row"] - result["row"] % limit  # the page that holds what was just aligned
+                offset = result["row"]  # the payload opens the page that holds what was just aligned
             payload = alignment_matrix_payload(alignment_set, request.user, offset, limit)
         if result is not None:
             payload["result"] = result

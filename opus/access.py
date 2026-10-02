@@ -20,6 +20,23 @@ def owns_work(work, user):
     return work.owner_id == user.pk
 
 
+def can_edit_lexical_entry(entry, user):
+    """Owners and curators edit an entry.
+
+    An entry from before entries had owners may be edited by the one user whose
+    annotations use it, which lets them claim it.
+    """
+
+    if user.is_staff or entry.owner_id == user.pk:
+        return True
+    if entry.owner_id is not None:
+        return False
+    return (
+        entry.annotations.filter(user=user).exists()
+        and not entry.annotations.exclude(user=user).exists()
+    )
+
+
 class CuratorWritePermission(BasePermission):
     """Keep shared catalog data readable while reserving changes for curators."""
 

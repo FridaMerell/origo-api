@@ -26,7 +26,9 @@ class AnnotationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return visible_to_user(
-            Annotation.objects.filter(user=self.request.user).select_related("unit__version__work"),
+            Annotation.objects.filter(user=self.request.user).select_related(
+                "unit__version__work", "unit__parent", "lexical_entry"
+            ),
             self.request.user,
             "unit__version__work__",
         )

@@ -34,10 +34,11 @@ class Column:
         rows = list(
             TextUnit.objects.filter(version_id=version.text_version_id, kind=TextUnit.Kind.PARAGRAPH)
             .order_by("position", "id")
-            .values_list("id", "position")
+            .values_list("id", "position", "parent_id")
         )
-        self.paragraph_ids = [unit_id for unit_id, _ in rows]
-        self.paragraph_positions = [position for _, position in rows]
+        self.paragraph_ids = [unit_id for unit_id, _, _ in rows]
+        self.paragraph_positions = [position for _, position, _ in rows]
+        self.paragraph_chapters = [chapter_id for _, _, chapter_id in rows]
         self.index_of = {unit_id: index for index, unit_id in enumerate(self.paragraph_ids)}
         self.gaps = {}
         for gap in gaps:
@@ -50,6 +51,22 @@ class Column:
             if start is not None and end is not None and end > start:
                 self.spans[start] = end
         self.cells = self._cells()
+        # Per paragraph index: ``(first paragraph index of its cell, row)`` - a joined cell's
+        # paragraphs share one row. ``None`` would mean a paragraph without a cell (cannot happen).
+        self.cell_of = [None] * len(self.paragraph_ids)
+        for row, cell in enumerate(self.cells):
+            if cell[0] == TEXT:
+                for index in range(cell[1], cell[2] + 1):
+                    self.cell_of[index] = (cell[1], row)
+
+    def next_chapter(self, index):
+        """Index of the first paragraph after ``index`` that belongs to another chapter, or ``None``."""
+
+        chapter = self.paragraph_chapters[index]
+        return next(
+            (later for later in range(index + 1, len(self.paragraph_ids)) if self.paragraph_chapters[later] != chapter),
+            None,
+        )
 
     def _cells(self):
         """``(GAP, anchor_index)`` or ``(TEXT, first_index, last_index)`` per row."""
@@ -92,6 +109,33 @@ class Grid:
     @property
     def total_rows(self):
         return max((len(column.cells) for column in self.columns), default=0)
+
+    def pages(self, size):
+        """The reader's pages as ``(first_row, end_row)``, like a book's.
+
+        Every chapter of the first edition (the reference column, as for reading positions)
+        starts on a new page; a longer chapter continues over pages of at most ``size`` rows.
+        """
+
+        total = self.total_rows
+        if total == 0:
+            return []
+        starts = {0}
+        if self.columns:
+            column = self.columns[0]
+            for row, cell in enumerate(column.cells):
+                if cell[0] != TEXT:
+                    continue
+                index = cell[1]
+                # The edition's first paragraph opens its first chapter too, even when other
+                # editions' text (e.g. a foreword) fills the rows above it.
+                if index == 0 or column.paragraph_chapters[index] != column.paragraph_chapters[index - 1]:
+                    starts.add(row)
+        boundaries = sorted(starts) + [total]
+        pages = []
+        for first, end in zip(boundaries, boundaries[1:]):
+            pages.extend((row, min(row + size, end)) for row in range(first, end, size))
+        return pages
 
     def row_at_position(self, position):
         """Row of the first paragraph at or after ``position`` in the first edition (or ``None``).
@@ -203,38 +247,24 @@ class Grid:
                 .values_list("parent_id", "id")
             ):
                 first[column.version.id].setdefault(parent_id, column.index_of[unit_id])
-        start_row = {
-            column.version.id: {cell[1]: row for row, cell in enumerate(column.cells) if cell[0] == TEXT}
-            for column in self.columns
-        }
-
-        def order(match):
-            return min(first[v].get(chapter, 1 << 60) for v, chapter in match.items())
-
-        padding = {column.version.id: 0 for column in self.columns}
-        added = {}
-        aligned = gaps = 0
-        for match in sorted(matches, key=order):
-            rows = {}
+        resolved = []
+        for number, match in enumerate(matches):
+            targets = []
             for version_id, chapter_id in match.items():
+                column = self.column(version_id)
                 index = first[version_id].get(chapter_id)
-                row = start_row[version_id].get(index) if index is not None else None
-                if row is not None:
-                    rows[version_id] = (row + padding[version_id], index)
-            if len(rows) < 2:
-                continue
-            target = max(row for row, _ in rows.values())
-            for version_id, (row, index) in rows.items():
-                missing = target - row
-                if missing:
-                    added[(version_id, index)] = added.get((version_id, index), 0) + missing
-                    padding[version_id] += missing
-                    gaps += missing
-            aligned += 1
+                cell = column.cell_of[index] if index is not None else None
+                # Skipped: a chapter without text, or one whose first paragraph is inside a joined cell.
+                if cell is not None and cell[0] == index:
+                    targets.append((column, index, cell[1]))
+            if len(targets) >= 2:
+                resolved.append((number, targets))
+        resolved.sort(key=lambda entry: min(row for _, _, row in entry[1]))
+        added, plan = self._plan(resolved, strict=False)
         with transaction.atomic():
             for (version_id, index), count in added.items():
                 self._add_gaps(self.column(version_id), index, count)
-        return aligned, gaps
+        return len(plan), sum(added.values())
 
     def _resolve_group(self, items):
         """Resolve ``(version_id, unit_id)`` items to ``(column, first paragraph index, row)``.
@@ -283,25 +313,7 @@ class Grid:
 
         resolved = [(number, self._resolve_group(items)) for number, items in enumerate(groups)]
         resolved.sort(key=lambda entry: min(row for _, _, row in entry[1]))
-        padding = {column.version.id: 0 for column in self.columns}
-        last_index = {column.version.id: -1 for column in self.columns}
-        added, plan = {}, []
-        for number, targets in resolved:
-            for column, index, _ in targets:
-                if index <= last_index[column.version.id]:
-                    raise GridError("Chapters must be added in the order they appear in the book, once each.")
-            target = max(row + padding[column.version.id] for column, _, row in targets)
-            gaps, positions = {}, {}
-            for column, index, row in targets:
-                version_id = column.version.id
-                missing = target - (row + padding[version_id])
-                if missing:
-                    added[(version_id, index)] = added.get((version_id, index), 0) + missing
-                    padding[version_id] += missing
-                    gaps[version_id] = missing
-                last_index[version_id] = index
-                positions[version_id] = column.paragraph_positions[index]
-            plan.append({"index": number, "row": target, "gaps": gaps, "positions": positions})
+        added, plan = self._plan(resolved, strict=True)
         if apply and added:
             with transaction.atomic():
                 for (version_id, index), count in added.items():
@@ -313,6 +325,107 @@ class Grid:
         }
 
     # -- helpers ----------------------------------------------------------------------------
+
+    def _plan(self, resolved, strict):
+        """Gaps that give each group's cells one row, while leaving the rest of the book as it was.
+
+        ``resolved`` is ``[(number, [(column, first paragraph index, row)])]``, top of the book
+        first. A group is aligned by pushing the higher cells down to the lowest one; that push
+        would also move everything after it in those editions, undoing alignments further down.
+        So the push is evened out where the group's chapter ends: each other edition in the group
+        gets the missing gaps where *its* next chapter starts, and an edition outside the group
+        gets them at the corresponding row. From there on every edition has moved by the same
+        amount, so only the synced chapter itself changes.
+
+        Returns ``(added, plan)``: ``{(version_id, paragraph index): gap count}`` and one
+        ``{"index", "row", "gaps", "positions"}`` per aligned group. With ``strict`` a group out
+        of book order raises ``GridError``; otherwise it is skipped.
+        """
+
+        inserts = {column.version.id: [] for column in self.columns}  # (paragraph index, count)
+        last_index = {column.version.id: -1 for column in self.columns}
+        plan = []
+
+        def shift(version_id, index):
+            return sum(count for at, count in inserts[version_id] if at <= index)
+
+        def insert(column, index, count):
+            # Gaps go above a whole cell, never inside a joined one.
+            inserts[column.version.id].append((column.cell_of[index][0], count))
+
+        def first_at_or_below(column, row):
+            """Index of the first paragraph whose (shifted) row is at or below ``row``."""
+            running, pending = 0, sorted(inserts[column.version.id])
+            for index, cell in enumerate(column.cell_of):
+                while pending and pending[0][0] <= index:
+                    running += pending.pop(0)[1]
+                if cell is not None and cell[1] + running >= row:
+                    return index
+            return None
+
+        for position, (number, targets) in enumerate(resolved):
+            if any(index <= last_index[column.version.id] for column, index, _ in targets):
+                if strict:
+                    raise GridError("Chapters must be added in the order they appear in the book, once each.")
+                continue
+            # What later groups of this same sync will align anyway: evening out there is redundant
+            # (and would only add blank rows), since that group sets the rows itself.
+            later = resolved[position + 1 :]
+            aligned_later = {(column.version.id, index) for _, items in later for column, index, _ in items}
+            editions_later = {version_id for version_id, _ in aligned_later}
+            current = {column.version.id: row + shift(column.version.id, index) for column, index, row in targets}
+            target = max(current.values())
+            missing = {version_id: target - row for version_id, row in current.items()}
+            most = max(missing.values())
+
+            # Where an edition that already sits on the target row reaches its next chapter: the
+            # row from which every edition must have moved by ``most``.
+            anchor = None
+            for column, index, _ in targets:
+                following = column.next_chapter(index)
+                if missing[column.version.id] == 0 and following is not None:
+                    row = column.cell_of[following][1] + shift(column.version.id, following)
+                    anchor = row if anchor is None else min(anchor, row)
+
+            gaps = {}
+            for column, index, _ in targets:
+                version_id = column.version.id
+                if missing[version_id]:
+                    insert(column, index, missing[version_id])
+                    gaps[version_id] = missing[version_id]
+            if most:
+                for column, index, _ in targets:
+                    extra = most - missing[column.version.id]
+                    following = column.next_chapter(index)
+                    if extra and following is not None and (column.version.id, following) not in aligned_later:
+                        insert(column, following, extra)
+                        gaps[column.version.id] = gaps.get(column.version.id, 0) + extra
+                if anchor is not None:
+                    in_group = {column.version.id for column, _, _ in targets}
+                    for column in self.columns:
+                        if column.version.id in in_group or column.version.id in editions_later:
+                            continue
+                        at = first_at_or_below(column, anchor)
+                        if at is not None:
+                            insert(column, at, most)
+                            gaps[column.version.id] = most
+
+            for column, index, _ in targets:
+                last_index[column.version.id] = index
+            plan.append(
+                {
+                    "index": number,
+                    "row": target,
+                    "gaps": gaps,
+                    "positions": {column.version.id: column.paragraph_positions[index] for column, index, _ in targets},
+                }
+            )
+
+        added = {}
+        for version_id, items in inserts.items():
+            for at, count in items:
+                added[(version_id, at)] = added.get((version_id, at), 0) + count
+        return added, plan
 
     @staticmethod
     def _add_gaps(column, index, count):

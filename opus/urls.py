@@ -14,6 +14,7 @@ from opus.views import (
     BibliographyEntryViewSet,
     BookmarkViewSet,
     ExcerptViewSet,
+    GlossaryViewSet,
     LexicalEntryViewSet,
     ReadingProgressViewSet,
     SourceFileViewSet,
@@ -41,6 +42,7 @@ router.register("author-identifiers", AuthorIdentifierViewSet, basename="author-
 router.register("bibliography-entries", BibliographyEntryViewSet, basename="bibliography-entry")
 router.register("bookmarks", BookmarkViewSet, basename="bookmark")
 router.register("excerpts", ExcerptViewSet, basename="excerpt")
+router.register("glossaries", GlossaryViewSet, basename="glossary")
 router.register("lexical-entries", LexicalEntryViewSet, basename="lexical-entry")
 router.register("reading-progress", ReadingProgressViewSet, basename="reading-progress")
 router.register("shelves", ShelfViewSet, basename="shelf")

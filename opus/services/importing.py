@@ -13,11 +13,11 @@ from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import F, Max, Q
 from docx import Document
 from pypdf import PdfReader
 
-from opus.models import Edition, SourceFile, TextUnit
+from opus.models import AlignmentSpan, Edition, SourceFile, TextUnit
 
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -155,24 +155,126 @@ def import_document(edition, uploaded_file, *, extracted=None, label=""):
     return source_file, extracted.paragraph_count
 
 
-def append_document(edition, *, extracted, label=""):
-    """Add an uploaded document's chapters after the text an edition already has.
+def append_document(edition, *, extracted, label="", before=None):
+    """Add an uploaded document's chapters to an edition that already has text.
 
+    They go after the last chapter, or in front of chapter ``before`` (a top-level chapter of
+    this edition) - so chapter 2 can be added first and chapter 1 slotted in ahead of it later.
     A file without chapter headings becomes a single chapter named ``label`` (see
-    ``titled_chapters``). Its paragraphs follow the edition's last one, so the parallel grid
-    simply grows at the end of that edition's column.
+    ``titled_chapters``).
     """
 
     chapters = titled_chapters(extracted, label)
     with transaction.atomic():
-        # Serialise concurrent appends to one edition, or both would take the same positions.
-        Edition.objects.select_for_update().filter(pk=edition.pk).first()
-        units = TextUnit.objects.filter(version=edition)
-        last_top_level = units.filter(parent__isnull=True).aggregate(last=Max("position"))["last"] or 0
-        last_paragraph = units.filter(kind=TextUnit.Kind.PARAGRAPH).aggregate(last=Max("position"))["last"] or 0
+        _lock(edition)
+        chapter_after, paragraph_after = _insertion_point(edition, before)
+        _make_room(
+            edition,
+            chapter_after,
+            paragraph_after,
+            chapters=len(chapters),
+            paragraphs=sum(len(chapter.paragraphs) for chapter in chapters),
+        )
         source_file = _create_source_file(edition, extracted)
-        _create_chapters(edition, chapters, chapter_start=last_top_level, paragraph_start=last_paragraph)
+        _create_chapters(edition, chapters, chapter_start=chapter_after, paragraph_start=paragraph_after)
     return source_file, extracted.paragraph_count
+
+
+def add_empty_chapter(edition, label, *, before=None):
+    """A named chapter without text - a placeholder for one this edition lacks (e.g. chapter 1
+    when only chapter 2 has been uploaded). It sits after the last chapter or before ``before``."""
+
+    with transaction.atomic():
+        _lock(edition)
+        chapter_after, paragraph_after = _insertion_point(edition, before)
+        _make_room(edition, chapter_after, paragraph_after, chapters=1, paragraphs=0)
+        return TextUnit.objects.create(
+            version=edition,
+            kind=TextUnit.Kind.CHAPTER,
+            position=chapter_after + 1,
+            content="",
+            label=label.strip() or "Namnlöst kapitel",
+        )
+
+
+def reorder_chapters(edition, chapter_ids):
+    """Put an edition's chapters in the order of ``chapter_ids`` (every top-level chapter, once).
+
+    Paragraph positions are renumbered to follow the new chapter order, since the parallel grid
+    reads an edition's paragraphs by position. A joined cell (``AlignmentSpan``) that would now
+    straddle two chapters no longer covers consecutive text, so it is dissolved.
+    """
+
+    with transaction.atomic():
+        _lock(edition)
+        chapters = {
+            chapter.id: chapter
+            for chapter in TextUnit.objects.filter(version=edition, kind=TextUnit.Kind.CHAPTER, parent__isnull=True)
+        }
+        if len(chapter_ids) != len(chapters) or set(chapter_ids) != set(chapters):
+            raise DocumentImportError("Give every chapter of the edition exactly once.")
+        ordered = [chapters[chapter_id] for chapter_id in chapter_ids]
+
+        paragraphs = TextUnit.objects.filter(version=edition, kind=TextUnit.Kind.PARAGRAPH)
+        by_chapter = {}
+        for paragraph in paragraphs.order_by("position", "id"):
+            by_chapter.setdefault(paragraph.parent_id, []).append(paragraph)
+        # Paragraphs outside any chapter (older imports) stay first, as they are today.
+        sequence = by_chapter.get(None, []) + [p for chapter in ordered for p in by_chapter.get(chapter.id, [])]
+
+        # Positions are unique per (edition, parent): park them all, then number them afresh.
+        paragraphs.update(position=F("position") + POSITION_PARK)
+        for position, paragraph in enumerate(sequence, start=1):
+            paragraph.position = position
+        TextUnit.objects.bulk_update(sequence, ["position"], batch_size=1000)
+        for position, chapter in enumerate(ordered, start=1):
+            chapter.position = position
+        TextUnit.objects.bulk_update(ordered, ["position"])
+
+        AlignmentSpan.objects.filter(alignment_version__text_version=edition).exclude(
+            start_unit__parent=F("end_unit__parent")
+        ).delete()
+
+
+# Larger than any real position: rows are parked above it while positions are renumbered.
+POSITION_PARK = 1_000_000_000
+
+
+def _lock(edition):
+    """Serialise structural edits of one edition, or two of them could take the same positions."""
+
+    Edition.objects.select_for_update().filter(pk=edition.pk).first()
+
+
+def _insertion_point(edition, before):
+    """``(chapter position, paragraph position)`` that new chapters and their paragraphs follow:
+    the edition's end, or just ahead of chapter ``before``."""
+
+    units = TextUnit.objects.filter(version=edition)
+    paragraphs = units.filter(kind=TextUnit.Kind.PARAGRAPH)
+    if before is None:
+        last_chapter = units.filter(kind=TextUnit.Kind.CHAPTER, parent__isnull=True).aggregate(last=Max("position"))
+        last_paragraph = paragraphs.aggregate(last=Max("position"))
+        return last_chapter["last"] or 0, last_paragraph["last"] or 0
+    # The paragraphs that stay ahead: those outside chapters and those of earlier chapters.
+    ahead = paragraphs.filter(Q(parent__isnull=True) | Q(parent__position__lt=before.position))
+    return before.position - 1, ahead.aggregate(last=Max("position"))["last"] or 0
+
+
+def _make_room(edition, chapter_after, paragraph_after, *, chapters, paragraphs):
+    """Move later chapters and paragraphs on by ``chapters`` and ``paragraphs`` positions."""
+
+    units = TextUnit.objects.filter(version=edition)
+    if chapters:
+        units.filter(kind=TextUnit.Kind.CHAPTER, parent__isnull=True, position__gt=chapter_after).update(
+            position=F("position") + chapters
+        )
+    if paragraphs:
+        later = units.filter(kind=TextUnit.Kind.PARAGRAPH, position__gt=paragraph_after)
+        later.update(position=F("position") + POSITION_PARK)
+        units.filter(kind=TextUnit.Kind.PARAGRAPH, position__gte=POSITION_PARK).update(
+            position=F("position") - POSITION_PARK + paragraphs
+        )
 
 
 def titled_chapters(extracted, label=""):

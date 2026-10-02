@@ -18,6 +18,8 @@ class DocumentUploadSerializer(serializers.Serializer):
     front_matter = serializers.ChoiceField(choices=["keep", "skip"], default="keep")
     # The chapter's name when the file has no chapter headings of its own (default: file name).
     label = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    # append-document only: the chapter (id) the new chapters go in front of; empty = at the end.
+    before = serializers.IntegerField(required=False, allow_null=True, default=None)
 
     def extract_options(self):
         """Keyword arguments for ``extract_document``."""
