@@ -54,6 +54,7 @@ def reading_unit_payload(unit):
                         "part_of_speech": annotation.lexical_entry.part_of_speech,
                         "gender": annotation.lexical_entry.gender,
                         "inflection_data": annotation.lexical_entry.inflection_data,
+                        "translation": annotation.lexical_entry.translation,
                         "definition": annotation.lexical_entry.definition,
                     }
                     if annotation.lexical_entry_id

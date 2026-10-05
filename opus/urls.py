@@ -16,6 +16,7 @@ from opus.views import (
     ExcerptViewSet,
     GlossaryViewSet,
     LexicalEntryViewSet,
+    LexicalFormViewSet,
     ReadingProgressViewSet,
     SourceFileViewSet,
     ReadingView,
@@ -44,6 +45,7 @@ router.register("bookmarks", BookmarkViewSet, basename="bookmark")
 router.register("excerpts", ExcerptViewSet, basename="excerpt")
 router.register("glossaries", GlossaryViewSet, basename="glossary")
 router.register("lexical-entries", LexicalEntryViewSet, basename="lexical-entry")
+router.register("lexical-forms", LexicalFormViewSet, basename="lexical-form")
 router.register("reading-progress", ReadingProgressViewSet, basename="reading-progress")
 router.register("shelves", ShelfViewSet, basename="shelf")
 router.register("source-files", SourceFileViewSet, basename="source-file")

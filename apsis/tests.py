@@ -55,14 +55,25 @@ class PostViewSetTests(APITestCase):
         post.refresh_from_db()
         self.assertEqual(post.content, 'edited')
 
-    def test_other_user_cannot_edit_the_post(self):
+    def test_other_user_can_edit_the_post(self):
         post = Post.objects.create(content='original', author=self.author)
         client = APIClient()
         client.force_authenticate(user=self.other)
 
         response = client.patch(f'/api/apsis/posts/{post.pk}/', {'content': 'edited'})
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        post.refresh_from_db()
+        self.assertEqual(post.content, 'edited')
+        self.assertEqual(post.author, self.author)
+
+    def test_anonymous_cannot_edit_the_post(self):
+        post = Post.objects.create(content='original', author=self.author)
+        client = APIClient()
+
+        response = client.patch(f'/api/apsis/posts/{post.pk}/', {'content': 'edited'})
+
+        self.assertEqual(response.status_code, 401)
         post.refresh_from_db()
         self.assertEqual(post.content, 'original')
 
@@ -75,14 +86,23 @@ class PostViewSetTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_other_user_cannot_delete_the_post(self):
+    def test_other_user_can_delete_the_post(self):
         post = Post.objects.create(content='original', author=self.author)
         client = APIClient()
         client.force_authenticate(user=self.other)
 
         response = client.delete(f'/api/apsis/posts/{post.pk}/')
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Post.objects.filter(pk=post.pk).exists())
+
+    def test_anonymous_cannot_delete_the_post(self):
+        post = Post.objects.create(content='original', author=self.author)
+        client = APIClient()
+
+        response = client.delete(f'/api/apsis/posts/{post.pk}/')
+
+        self.assertEqual(response.status_code, 401)
         self.assertTrue(Post.objects.filter(pk=post.pk).exists())
 
     def test_str_falls_back_to_placeholder_when_a_file_entry_has_no_name(self):

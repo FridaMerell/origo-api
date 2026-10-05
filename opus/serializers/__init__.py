@@ -17,8 +17,11 @@ from .documents import (
 from .lexicon import (
     GlossaryDetailSerializer,
     GlossaryEntrySerializer,
+    GlossaryQuizSerializer,
     GlossarySerializer,
+    LanguageQuizSerializer,
     LexicalEntrySerializer,
+    LexicalFormSerializer,
 )
 from .people import (
     AuthorAliasSerializer,
@@ -53,8 +56,11 @@ __all__ = [
     "DocumentUploadSerializer",
     "GlossaryDetailSerializer",
     "GlossaryEntrySerializer",
+    "GlossaryQuizSerializer",
     "GlossarySerializer",
+    "LanguageQuizSerializer",
     "LexicalEntrySerializer",
+    "LexicalFormSerializer",
     "ReadingProgressOverviewSerializer",
     "ReadingProgressSerializer",
     "ShelfSerializer",

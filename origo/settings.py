@@ -294,6 +294,9 @@ APSIS_NEWSLETTER_TIME_ZONE = os.environ.get(
     "APSIS_NEWSLETTER_TIME_ZONE", "Europe/Stockholm"
 )
 
+# Svenska kyrkan API key (Platser and Kyrkobyggnadsregistret), used to connect Apsis posts to a church.
+SVENSKAKYRKAN_TOKEN = os.environ.get("SVENSKAKYRKAN_TOKEN", "")
+
 
 # Web Push (VAPID)
 # One key pair, generated once (`vapid --gen` / `npx web-push generate-vapid-keys`).

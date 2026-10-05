@@ -54,6 +54,7 @@ class AnnotationSerializer(serializers.ModelSerializer):
             "language": entry.language,
             "part_of_speech": entry.part_of_speech,
             "inflection_data": entry.inflection_data,
+            "translation": entry.translation,
             "definition": entry.definition,
             "owner": entry.owner_id,
         }

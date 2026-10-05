@@ -18,6 +18,7 @@ class PostSerializer(serializers.ModelSerializer):
             "geolocation",
             "content",
             "name",
+            "svenska_kyrkan_place_id",
             "created_at",
         ]
         read_only_fields = ["created_at"]

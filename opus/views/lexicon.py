@@ -6,34 +6,48 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from opus.access import can_edit_lexical_entry, owns_work, visible_to_user
-from opus.models import Glossary, LexicalEntry
+from opus.models import Glossary, LexicalEntry, LexicalForm
 from opus.serializers import (
     GlossaryDetailSerializer,
     GlossaryEntrySerializer,
+    GlossaryQuizSerializer,
     GlossarySerializer,
+    LanguageQuizSerializer,
     LexicalEntrySerializer,
+    LexicalFormSerializer,
 )
 
 
-def visible_lexical_entries(user):
+def visible_entry_filter(user, entry_path=""):
     """Entries the user owns, unowned catalog entries, and entries in glossaries the user can see."""
 
     return (
-        LexicalEntry.objects.filter(
-            Q(owner=user)
-            | Q(owner__isnull=True)
-            | Q(glossaries__is_private=False)
-            | Q(glossaries__owner=user)
-        )
-        .distinct()
-        .prefetch_related(
-            Prefetch(
-                "glossaries",
-                queryset=Glossary.objects.filter(owner=user),
-                to_attr="request_glossaries",
-            )
-        )
+        Q(**{f"{entry_path}owner": user})
+        | Q(**{f"{entry_path}owner__isnull": True})
+        | Q(**{f"{entry_path}glossaries__is_private": False})
+        | Q(**{f"{entry_path}glossaries__owner": user})
     )
+
+
+# What ``LexicalFormSerializer.source`` reads.
+FORM_SOURCE_RELATIONS = ("unit__version__work", "unit__parent")
+
+
+def with_entry_details(queryset, user):
+    """Prefetch what ``LexicalEntrySerializer`` reads for each entry."""
+
+    return queryset.prefetch_related(
+        Prefetch(
+            "glossaries",
+            queryset=Glossary.objects.filter(owner=user),
+            to_attr="request_glossaries",
+        ),
+        Prefetch("forms", queryset=LexicalForm.objects.select_related(*FORM_SOURCE_RELATIONS)),
+    )
+
+
+def visible_lexical_entries(user):
+    return with_entry_details(LexicalEntry.objects.filter(visible_entry_filter(user)).distinct(), user)
 
 
 class LexicalEntryViewSet(viewsets.ModelViewSet):
@@ -46,6 +60,8 @@ class LexicalEntryViewSet(viewsets.ModelViewSet):
         "lemma": ["exact", "icontains"],
         "owner": ["exact"],
         "glossaries": ["exact"],
+        # Look up the base form from a spelling variant or inflected form.
+        "forms__form": ["iexact"],
     }
 
     def get_queryset(self):
@@ -69,6 +85,69 @@ class LexicalEntryViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only the entry owner can delete it.")
         instance.delete()
 
+    @action(detail=False, methods=["get"])
+    def languages(self, request):
+        """The languages of the user's own words, with how many words each has."""
+
+        rows = (
+            LexicalEntry.objects.filter(owner=request.user)
+            .values("language")
+            .annotate(count=Count("id"))
+            .order_by("language")
+        )
+        return Response(list(rows))
+
+    @action(detail=False, methods=["get"])
+    def quiz(self, request):
+        """A random selection of the user's own words in one language for a vocabulary quiz."""
+
+        params = LanguageQuizSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        entries = with_entry_details(
+            LexicalEntry.objects.filter(owner=request.user, language=params.validated_data["language"]).order_by("?"),
+            request.user,
+        )[: params.validated_data["count"]]
+        return Response(LexicalEntrySerializer(entries, many=True, context=self.get_serializer_context()).data)
+
+
+class LexicalFormViewSet(viewsets.ModelViewSet):
+    serializer_class = LexicalFormSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = {
+        "entry": ["exact"],
+        "form": ["exact", "iexact", "icontains"],
+        "kind": ["exact"],
+        "is_uncertain": ["exact"],
+        "unit": ["exact"],
+    }
+
+    def get_queryset(self):
+        return (
+            LexicalForm.objects.filter(visible_entry_filter(self.request.user, "entry__"))
+            .distinct()
+            .select_related(*FORM_SOURCE_RELATIONS)
+        )
+
+    def _check_entry(self, entry):
+        if not visible_lexical_entries(self.request.user).filter(pk=entry.pk).exists():
+            raise ValidationError({"entry": "The entry does not exist."})
+        if not can_edit_lexical_entry(entry, self.request.user):
+            raise PermissionDenied("Only the entry owner can change its forms.")
+
+    def perform_create(self, serializer):
+        self._check_entry(serializer.validated_data["entry"])
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._check_entry(serializer.instance.entry)
+        if "entry" in serializer.validated_data:
+            self._check_entry(serializer.validated_data["entry"])
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._check_entry(instance.entry)
+        instance.delete()
+
 
 class GlossaryViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -86,18 +165,9 @@ class GlossaryViewSet(viewsets.ModelViewSet):
         queryset = visible_to_user(Glossary.objects.all(), user).annotate(
             entry_count=Count("entries", distinct=True)
         )
-        if self.action != "list":
+        if self.action not in ("list", "quiz"):
             queryset = queryset.prefetch_related(
-                Prefetch(
-                    "entries",
-                    queryset=LexicalEntry.objects.prefetch_related(
-                        Prefetch(
-                            "glossaries",
-                            queryset=Glossary.objects.filter(owner=user),
-                            to_attr="request_glossaries",
-                        )
-                    ),
-                )
+                Prefetch("entries", queryset=with_entry_details(LexicalEntry.objects.all(), user))
             )
         return queryset
 
@@ -126,6 +196,16 @@ class GlossaryViewSet(viewsets.ModelViewSet):
             raise ValidationError({"lexical_entry": "The entry does not exist."})
         glossary.entries.add(entry)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["get"])
+    def quiz(self, request, pk=None):
+        """A random selection of the glossary's words for a vocabulary quiz."""
+
+        glossary = self.get_object()
+        params = GlossaryQuizSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        entries = with_entry_details(glossary.entries.order_by("?"), request.user)[: params.validated_data["count"]]
+        return Response(LexicalEntrySerializer(entries, many=True, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["delete"], url_path=r"entries/(?P<entry_id>\d+)")
     def remove_entry(self, request, pk=None, entry_id=None):

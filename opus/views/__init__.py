@@ -9,7 +9,7 @@ from .alignment import (
 )
 from .annotations import AnnotationViewSet
 from .documents import BookmarkViewSet, ExcerptViewSet, ReadingProgressViewSet
-from .lexicon import GlossaryViewSet, LexicalEntryViewSet
+from .lexicon import GlossaryViewSet, LexicalEntryViewSet, LexicalFormViewSet
 from .people import (
     AuthorAliasViewSet,
     AuthorIdentifierViewSet,
@@ -35,6 +35,7 @@ __all__ = [
     "ExcerptViewSet",
     "GlossaryViewSet",
     "LexicalEntryViewSet",
+    "LexicalFormViewSet",
     "ReadingProgressViewSet",
     "ShelfViewSet",
     "SourceFileViewSet",
