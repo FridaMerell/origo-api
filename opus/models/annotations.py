@@ -22,8 +22,9 @@ class Annotation(models.Model):
     body = models.TextField(blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="opus_annotations")
     unit = models.ForeignKey(TextUnit, on_delete=models.CASCADE, related_name="annotations")
+    # Set on a definition, which is nothing without its word: deleting the word deletes it.
     lexical_entry = models.ForeignKey(
-        LexicalEntry, on_delete=models.SET_NULL, related_name="annotations", null=True, blank=True
+        LexicalEntry, on_delete=models.CASCADE, related_name="annotations", null=True, blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

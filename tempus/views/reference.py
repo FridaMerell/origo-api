@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 
 from django.conf import settings
-from rest_framework import viewsets
+from rest_framework import permissions, viewsets
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from tempus import models
-from tempus.api.common import SharedDataViewSet
+from tempus.api.common import PublicReadThrottle, SharedDataViewSet
 from tempus.models import GeoArea, LandCoverFetch, Locale, Phenophase, Source
 from tempus.serializers import GeoAreaSerializer, PhenophaseSerializer, SourceSerializer
 from tempus.serializers.geography import LocaleSerializer
@@ -97,6 +97,13 @@ class GeoAreaViewSet(SharedDataViewSet):
     queryset = GeoArea.objects.all()
     serializer_class = GeoAreaSerializer
     filterset_fields = ["kind", "country_code"]
+    throttle_classes = [PublicReadThrottle]
+
+    def get_permissions(self):
+        # The area list backs the public seasonal overview's area selector.
+        if self.action in ("list", "retrieve"):
+            return [permissions.AllowAny()]
+        return super().get_permissions()
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)

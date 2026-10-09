@@ -17,9 +17,25 @@ def get_visible_work_or_404(user, work_id):
         raise Http404 from exc
 
 
+def lexical_entry_payload(entry):
+    return {
+        "id": entry.id,
+        "lemma": entry.lemma,
+        "language": entry.language,
+        "part_of_speech": entry.part_of_speech,
+        "gender": entry.gender,
+        "inflection_data": entry.inflection_data,
+        "translation": entry.translation,
+        "definition": entry.definition,
+        "owner": entry.owner_id,
+    }
+
+
 def reading_unit_payload(unit):
     """One reading unit with the requesting user's annotations (``request_annotations``).
 
+    ``glosses`` are the known words found in the text (``request_glosses``, see
+    ``opus.services.glosses``); empty where they have not been looked up.
     ``unit.parent`` must be loaded (``select_related("parent")``).
     """
 
@@ -47,21 +63,28 @@ def reading_unit_payload(unit):
                 "end_offset": annotation.end_offset,
                 "body": annotation.body,
                 "lexical_entry": (
-                    {
-                        "id": annotation.lexical_entry.id,
-                        "lemma": annotation.lexical_entry.lemma,
-                        "language": annotation.lexical_entry.language,
-                        "part_of_speech": annotation.lexical_entry.part_of_speech,
-                        "gender": annotation.lexical_entry.gender,
-                        "inflection_data": annotation.lexical_entry.inflection_data,
-                        "translation": annotation.lexical_entry.translation,
-                        "definition": annotation.lexical_entry.definition,
-                    }
-                    if annotation.lexical_entry_id
-                    else None
+                    lexical_entry_payload(annotation.lexical_entry) if annotation.lexical_entry_id else None
                 ),
             }
             for annotation in getattr(unit, "request_annotations", [])
+        ],
+        "glosses": [
+            {
+                "start_offset": gloss.start_offset,
+                "end_offset": gloss.end_offset,
+                "lexical_entry": lexical_entry_payload(gloss.entry),
+                "form": (
+                    {
+                        "id": gloss.form.id,
+                        "kind": gloss.form.kind,
+                        "inflection": gloss.form.inflection,
+                        "is_uncertain": gloss.form.is_uncertain,
+                    }
+                    if gloss.form
+                    else None
+                ),
+            }
+            for gloss in getattr(unit, "request_glosses", [])
         ],
     }
 

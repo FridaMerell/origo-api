@@ -20,12 +20,13 @@ from rest_framework.response import Response
 
 from origo.pagination import StandardPagination
 from tempus import tasks
-from tempus.api.common import SharedDataViewSet
+from tempus.api.common import PublicReadThrottle, SharedDataViewSet
 from tempus.serializers import (
     GeneratePhenogramsSerializer,
     PhenogramQuerySerializer,
     PhenogramSerializer,
     RegisterSpeciesSerializer,
+    SeasonalLandscapesQuerySerializer,
     SeasonalOverviewQuerySerializer,
     SeasonalOverviewSerializer,
     SpeciesCategoryListSerializer,
@@ -165,7 +166,13 @@ class SpeciesViewSet(SharedDataViewSet):
         )
         return Response(self.get_serializer(species, many=True).data)
 
-    @action(detail=False, methods=["get"], url_path="seasonal-overview")
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="seasonal-overview",
+        permission_classes=[permissions.AllowAny],
+        throttle_classes=[PublicReadThrottle],
+    )
     def seasonal_overview(self, request):
         """Paginated species with a useful current seasonal signal.
 
@@ -173,14 +180,36 @@ class SpeciesViewSet(SharedDataViewSet):
         fall back to the species' whole-range curve and label the source so the
         client can explain the lower geographic precision. No request starts an
         Artdatabanken crawl.
+
+        Readable without a session: the curves are derived from open
+        Artdatabanken data. An anonymous visitor follows nothing, so
+        ``is_followed`` is always false for them.
         """
         params = SeasonalOverviewQuerySerializer(data=request.query_params)
         params.is_valid(raise_exception=True)
         opts = params.validated_data
+        queryset, widened_for_followed = self._seasonal_overview_queryset(request, opts)
+        if widened_for_followed:
+            queryset = queryset[: self.MAX_FOLLOWED_WITHOUT_STATUS]
+        page = self.paginate_queryset(queryset)
+        self._prepare_overview_rows(page, opts)
+        serializer = SeasonalOverviewSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    def _seasonal_overview_queryset(self, request, opts):
+        """Ordered seasonal-overview rows for the validated query options.
+
+        Returns the queryset and whether the status filter was widened because
+        only followed species were asked for.
+        """
         geo_area = opts["geo_area"]
 
-        followed = SpeciesFollow.objects.filter(
-            species_id=OuterRef("species_id"), user=request.user
+        followed = (
+            SpeciesFollow.objects.filter(
+                species_id=OuterRef("species_id"), user=request.user
+            )
+            if request.user.is_authenticated
+            else SpeciesFollow.objects.none()
         )
         queryset = (
             Phenogram.objects.filter(years=phenogram.DEFAULT_YEARS)
@@ -203,6 +232,13 @@ class SpeciesViewSet(SharedDataViewSet):
         queryset = queryset.annotate(is_followed=Exists(followed))
         if "is_followed" in opts:
             queryset = queryset.filter(is_followed=opts["is_followed"])
+        if opts.get("landscape_type"):
+            # Only species for which this landscape type is of great significance.
+            queryset = queryset.filter(
+                species__landscape_types__contains=[
+                    {"name": opts["landscape_type"], "significance": "stor"}
+                ]
+            )
 
         wanted = opts["status"]
         widened_for_followed = (
@@ -279,22 +315,78 @@ class SpeciesViewSet(SharedDataViewSet):
             "seasonal_rank",
             "scope_rank",
             "low_confidence_rank",
+            # Most interesting first: the stored rarity of a report in this
+            # scope. Curves without a value yet sort after those that have one.
+            F("significance").desc(nulls_last=True),
             "-record_count",
             "species__swedish_name",
             "species__scientific_name",
         )
-        if widened_for_followed:
-            queryset = queryset[: self.MAX_FOLLOWED_WITHOUT_STATUS]
-        page = self.paginate_queryset(queryset)
-        for row in page:
+        return queryset, widened_for_followed
+
+    @staticmethod
+    def _prepare_overview_rows(rows, opts):
+        """Attach the per-row values the seasonal-overview serializer reads."""
+        geo_area = opts["geo_area"]
+        for row in rows:
             row._phenogram_scope = (
                 "selected_area" if geo_area is not None and row.geo_area_id == geo_area.pk
                 else "whole_range"
             )
             row._is_low_confidence = row.record_count < opts["min_records"]
             row._seasonal_status = season.status_for(row)
-        serializer = SeasonalOverviewSerializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="seasonal-landscapes",
+        permission_classes=[permissions.AllowAny],
+        throttle_classes=[PublicReadThrottle],
+    )
+    def seasonal_landscapes(self, request):
+        """The seasonal overview grouped by landscape type.
+
+        One entry per landscape type that is of great significance to at least
+        one listed species: how many such species there are and the first
+        ``limit`` of them, in the seasonal overview's own order. A species tied
+        to several landscape types is counted under each, so the counts overlap.
+
+        Same filters and the same anonymous access as ``seasonal-overview``.
+        One query: the grouping is done over the already filtered rows.
+        """
+        params = SeasonalLandscapesQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        opts = params.validated_data
+        queryset, widened_for_followed = self._seasonal_overview_queryset(request, opts)
+        if widened_for_followed:
+            queryset = queryset[: self.MAX_FOLLOWED_WITHOUT_STATUS]
+
+        groups = {}
+        for row in queryset:
+            for landscape in row.species.landscape_types or []:
+                if landscape.get("significance") != "stor":
+                    continue
+                name = landscape.get("name") or landscape.get("code")
+                if not name:
+                    continue
+                group = groups.setdefault(
+                    name,
+                    {"name": name, "code": landscape.get("code") or "", "count": 0, "rows": []},
+                )
+                group["count"] += 1
+                if len(group["rows"]) < opts["limit"]:
+                    group["rows"].append(row)
+
+        results = []
+        for group in sorted(groups.values(), key=lambda item: (-item["count"], item["name"])):
+            self._prepare_overview_rows(group["rows"], opts)
+            results.append({
+                "name": group["name"],
+                "code": group["code"],
+                "count": group["count"],
+                "species": SeasonalOverviewSerializer(group["rows"], many=True).data,
+            })
+        return Response({"results": results})
 
     @action(detail=False, methods=["post"])
     def register(self, request):

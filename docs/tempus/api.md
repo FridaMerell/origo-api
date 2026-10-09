@@ -31,7 +31,8 @@ Species actions:
 | `GET species/{dyntaxa-id}/phenogram/` | Read or queue one curve |
 | `POST species/{dyntaxa-id}/phenogram/` | Request refresh/build |
 | `POST species/generate-phenograms/` | Staff bulk fan-out |
-| `GET species/seasonal-overview/` | Paginated seasonal cards; requires `geo_area`, with `min_records`, `status`, and `is_followed` optional |
+| `GET species/seasonal-overview/` | Paginated seasonal cards; requires `geo_area`, with `min_records`, `status`, `is_followed`, and `landscape_type` optional |
+| `GET species/seasonal-landscapes/` | The seasonal cards grouped by landscape type: per type its `name`, `code`, overlapping `count`, and the first `limit` (default `3`) `species`; same filters as `seasonal-overview` |
 
 Regular `GET species/` and `GET species/{dyntaxa-id}/` responses include a
 `checklists` array scoped to the authenticated user. Every entry has the
@@ -47,9 +48,11 @@ Regular `GET species/` and `GET species/{dyntaxa-id}/` responses include a
 current-season card per species from already stored eight-year phenograms. It
 never starts an SOS fetch or rebuild in the request cycle.
 
-The default statuses are `coming_into_season`, `at_peak`, `in_season`, and
-`going_out_of_season`, so the start page has useful results throughout the
-active season. Pass a comma-separated `status` value to choose a narrower
+The default statuses are `at_peak`, `in_season`, `going_out_of_season`, and
+`coming_into_season`, so the start page has useful results throughout the
+active season. The order of the statuses is also the listing order: species in
+season come before those still on their way in, and within a status the rarest
+reports (`significance`) come first. Pass a comma-separated `status` value to choose a narrower
 selection, `min_records` to set the confidence threshold (default `20`), and
 `is_followed=true` to limit results to followed species.
 

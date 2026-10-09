@@ -315,11 +315,16 @@ class SeasonalOverviewQuerySerializer(serializers.Serializer):
         queryset=GeoArea.objects.all(), required=False, allow_null=True, default=None
     )
     min_records = serializers.IntegerField(min_value=0, required=False, default=20)
+    # The order is also the listing order: species in season come before those
+    # still on their way in.
     status = serializers.CharField(
         required=False,
-        default="coming_into_season,at_peak,in_season,going_out_of_season",
+        default="at_peak,in_season,going_out_of_season,coming_into_season",
     )
     is_followed = serializers.BooleanField(required=False)
+    # A landscape-type name exactly as stored on Species; keeps only species
+    # for which that type is of great significance.
+    landscape_type = serializers.CharField(required=False, max_length=120)
 
     def validate_status(self, value):
         statuses = [item.strip() for item in value.split(",") if item.strip()]
@@ -332,6 +337,13 @@ class SeasonalOverviewQuerySerializer(serializers.Serializer):
                 f"Unknown status value(s): {', '.join(invalid)}."
             )
         return list(dict.fromkeys(statuses))
+
+
+class SeasonalLandscapesQuerySerializer(SeasonalOverviewQuerySerializer):
+    """Filters for the seasonal overview grouped by landscape type."""
+
+    # How many species to list under each landscape type.
+    limit = serializers.IntegerField(min_value=1, max_value=10, required=False, default=3)
 
 
 class SeasonalOverviewSerializer(serializers.ModelSerializer):

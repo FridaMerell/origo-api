@@ -1,5 +1,6 @@
 from django.db.models import Count, Prefetch, Q
 from django.shortcuts import get_object_or_404
+from django_filters import CharFilter, FilterSet
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -50,19 +51,40 @@ def visible_lexical_entries(user):
     return with_entry_details(LexicalEntry.objects.filter(visible_entry_filter(user)).distinct(), user)
 
 
+class LexicalEntryFilter(FilterSet):
+    search = CharFilter(method="filter_search")
+
+    class Meta:
+        model = LexicalEntry
+        fields = {
+            "language": ["exact"],
+            "part_of_speech": ["exact"],
+            "gender": ["exact"],
+            "lemma": ["exact", "icontains"],
+            "owner": ["exact"],
+            "glossaries": ["exact"],
+            # Look up the base form from a spelling variant or inflected form.
+            "forms__form": ["iexact"],
+        }
+
+    def filter_search(self, queryset, name, value):
+        """A word by any of its names: the lemma, a saved form, the modern form or the translation."""
+
+        value = value.strip()
+        if not value:
+            return queryset
+        return queryset.filter(
+            Q(lemma__icontains=value)
+            | Q(forms__form__icontains=value)
+            | Q(inflection_data__modern_form__icontains=value)
+            | Q(translation__icontains=value)
+        )
+
+
 class LexicalEntryViewSet(viewsets.ModelViewSet):
     serializer_class = LexicalEntrySerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = {
-        "language": ["exact"],
-        "part_of_speech": ["exact"],
-        "gender": ["exact"],
-        "lemma": ["exact", "icontains"],
-        "owner": ["exact"],
-        "glossaries": ["exact"],
-        # Look up the base form from a spelling variant or inflected form.
-        "forms__form": ["iexact"],
-    }
+    filterset_class = LexicalEntryFilter
 
     def get_queryset(self):
         return visible_lexical_entries(self.request.user)

@@ -16,6 +16,7 @@ from opus.models import (
     AlignmentSet,
     AlignmentVersion,
     Annotation,
+    LexicalEntry,
     ReadingProgress,
     TextUnit,
 )
@@ -27,6 +28,8 @@ from opus.serializers import (
     AlignmentVersionSerializer,
 )
 from opus.services.alignment_grid import GAP, TEXT, Grid, GridError, reset as reset_alignment
+from opus.services.glosses import attach_glosses
+from .lexicon import visible_entry_filter
 from .status import reading_unit_payload
 
 DEFAULT_WINDOW = 10
@@ -105,7 +108,9 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
             if row < len(column.cells):
                 wanted[(column.version.id, row)] = column.unit_ids(column.cells[row])
     unit_ids = {unit_id for ids in wanted.values() for unit_id in ids}
-    units = {unit.id: unit for unit in TextUnit.objects.filter(id__in=unit_ids).select_related("parent")}
+    units = {
+        unit.id: unit for unit in TextUnit.objects.filter(id__in=unit_ids).select_related("parent", "version")
+    }
     annotations = {}
     for annotation in (
         Annotation.objects.filter(user=user, unit_id__in=unit_ids)
@@ -115,6 +120,7 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
         annotations.setdefault(annotation.unit_id, []).append(annotation)
     for unit in units.values():
         unit.request_annotations = annotations.get(unit.id, [])
+    attach_glosses(units.values(), LexicalEntry.objects.filter(visible_entry_filter(user)).distinct(), user)
     chapter_starts, empty_before = _chapter_markers(grid, rows_range, units)
 
     def unit_payload(unit_id):
