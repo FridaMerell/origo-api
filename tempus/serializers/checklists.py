@@ -335,3 +335,32 @@ class ObservationSerializer(serializers.ModelSerializer):
         link_observation_to_checklists(instance)
         return instance
 
+
+class PublicObservationSerializer(serializers.ModelSerializer):
+    """Read-only view of any user's observation, without private checklist data."""
+
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
+    last_name = serializers.CharField(source="user.last_name", read_only=True)
+    species_detail = ObservationSpeciesDetailSerializer(source="species", read_only=True)
+
+    class Meta:
+        model = Observation
+        fields = [
+            "id",
+            "user",
+            "username",
+            "first_name",
+            "last_name",
+            "species",
+            "species_detail",
+            "observed_at",
+            "location",
+            "count",
+            "life_stage",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = fields
+

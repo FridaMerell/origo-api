@@ -3,6 +3,7 @@ from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.routers import DefaultRouter
 
 from accounts.views import (
+    ActivityView,
     CSRFTokenView,
     InvitationViewSet,
     LoginView,
@@ -29,6 +30,7 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path('token/', obtain_auth_token, name='token'),
     path('me/', MeView.as_view(), name='me'),
+    path('activity/', ActivityView.as_view(), name='activity'),
     path(
         'push-subscriptions/',
         WebPushSubscriptionView.as_view(),

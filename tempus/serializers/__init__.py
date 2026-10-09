@@ -10,6 +10,7 @@ from .checklists import (
     ChecklistRegisterItemSerializer,
     ChecklistSerializer,
     ObservationSerializer,
+    PublicObservationSerializer,
 )
 from .geography import GeoAreaSerializer
 from .reference import PhenophaseSerializer, SourceSerializer
@@ -53,6 +54,7 @@ __all__ = [
     "PhenogramQuerySerializer",
     "PhenogramSerializer",
     "PhenophaseSerializer",
+    "PublicObservationSerializer",
     "RegisterSpeciesSerializer",
     "RouteSerializer",
     "RouteStopSerializer",

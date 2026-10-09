@@ -3,6 +3,7 @@ import uuid
 from urllib.parse import urlsplit, urlunsplit
 
 from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery
+from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import CharFilter, FilterSet, UUIDFilter
 from rest_framework import permissions, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -16,6 +17,7 @@ from tempus.serializers import (
     ChecklistRegisterItemSerializer,
     ChecklistSerializer,
     ObservationSerializer,
+    PublicObservationSerializer,
 )
 from tempus.models import (
     Checklist,
@@ -55,6 +57,16 @@ class ObservationFilter(FilterSet):
         raise ValidationError(
             {"species": "Ange ett Species-UUID eller ett Dyntaxa-taxon-id."}
         )
+
+
+class PublicObservationFilter(ObservationFilter):
+    """Filters for the all-users observation list (no private checklist/locale filters)."""
+
+    checklist = None
+
+    class Meta:
+        model = Observation
+        fields = ["species"]
 
 
 class ChecklistRegisterPagination(StandardPagination):
@@ -176,6 +188,25 @@ class ObservationViewSet(viewsets.ModelViewSet):
                 )
             )
         )
+
+    def retrieve(self, request, *args, **kwargs):
+        """Own observations in full; other users' observations without private data."""
+        observation = get_object_or_404(
+            Observation.objects.select_related("species").prefetch_related(
+                Prefetch(
+                    "checklist_items",
+                    queryset=ChecklistItem.objects.select_related("checklist"),
+                )
+            ),
+            pk=kwargs["pk"],
+        )
+        if observation.user_id == request.user.pk:
+            serializer = self.get_serializer(observation)
+        else:
+            serializer = PublicObservationSerializer(
+                observation, context=self.get_serializer_context()
+            )
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         locales = Locale.objects.filter(user=self.request.user)
@@ -304,4 +335,19 @@ class ObservationViewSet(viewsets.ModelViewSet):
                 "observations_linked": observations_linked,
                 "checklist_item_links_created": checklist_item_links_created,
             }
+        )
+
+
+class PublicObservationViewSet(viewsets.ReadOnlyModelViewSet):
+    """All observations from all users, readable by any signed-in user."""
+
+    serializer_class = PublicObservationSerializer
+    pagination_class = StandardPagination
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_class = PublicObservationFilter
+
+    def get_queryset(self):
+        return Observation.objects.select_related("species", "user").order_by(
+            "-observed_at", "-created_at", "-pk"
         )

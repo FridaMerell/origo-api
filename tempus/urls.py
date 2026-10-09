@@ -6,6 +6,7 @@ from tempus.views.checklists import (
     ChecklistItemViewSet,
     ChecklistViewSet,
     ObservationViewSet,
+    PublicObservationViewSet,
 )
 from tempus.views.reference import (
     AdministrativeBoundaryViewSet,
@@ -48,6 +49,9 @@ router.register("route-stops", RouteStopViewSet, basename="route-stop")
 router.register("checklists", ChecklistViewSet, basename="checklist")
 router.register("checklist-items", ChecklistItemViewSet, basename="checklist-item")
 router.register("observations", ObservationViewSet, basename="observation")
+router.register(
+    "all-observations", PublicObservationViewSet, basename="all-observation"
+)
 router.register("locales", LocaleViewSet, basename='locale')
 
 urlpatterns = [
