@@ -1,13 +1,21 @@
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
-from django_filters import CharFilter, FilterSet
+from django_filters import BooleanFilter, CharFilter, FilterSet, NumberFilter
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from opus.access import can_edit_lexical_entry, owns_work, visible_to_user
-from opus.models import Glossary, LexicalEntry, LexicalForm
+from opus.access import (
+    can_edit_lexical_entry,
+    editable_lexical_entries,
+    own_entry_condition,
+    owns_work,
+    visible_entry_filter,
+    visible_to_user,
+    with_edit_permission,
+)
+from opus.models import Glossary, LexicalEntry, LexicalForm, LexicalSynonym
 from opus.serializers import (
     GlossaryDetailSerializer,
     GlossaryEntrySerializer,
@@ -17,42 +25,51 @@ from opus.serializers import (
     LexicalEntrySerializer,
     LexicalFormSerializer,
 )
-
-
-def visible_entry_filter(user, entry_path=""):
-    """Entries the user owns, unowned catalog entries, and entries in glossaries the user can see."""
-
-    return (
-        Q(**{f"{entry_path}owner": user})
-        | Q(**{f"{entry_path}owner__isnull": True})
-        | Q(**{f"{entry_path}glossaries__is_private": False})
-        | Q(**{f"{entry_path}glossaries__owner": user})
-    )
-
+from origo.pagination import StandardPagination
 
 # What ``LexicalFormSerializer.source`` reads.
 FORM_SOURCE_RELATIONS = ("unit__version__work", "unit__parent")
 
 
-def with_entry_details(queryset, user):
-    """Prefetch what ``LexicalEntrySerializer`` reads for each entry."""
+def marked_for_quiz(user, entry="pk"):
+    """Whether ``user`` has marked the entry for quizzes, as a condition; ``entry`` is the path to it."""
 
-    return queryset.prefetch_related(
-        Prefetch(
-            "glossaries",
-            queryset=Glossary.objects.filter(owner=user),
-            to_attr="request_glossaries",
-        ),
-        Prefetch("forms", queryset=LexicalForm.objects.select_related(*FORM_SOURCE_RELATIONS)),
+    return Exists(LexicalEntry.objects.filter(pk=OuterRef(entry), quiz_users=user))
+
+
+def with_entry_details(queryset, user):
+    """Load what ``LexicalEntrySerializer`` reads for each entry.
+
+    A fixed number of queries whatever the number of entries; none of it repeats a row.
+    """
+
+    return (
+        with_edit_permission(queryset, user)
+        .annotate(request_in_quiz=marked_for_quiz(user))
+        .prefetch_related(
+            Prefetch(
+                "glossaries",
+                queryset=Glossary.objects.filter(owner=user),
+                to_attr="request_glossaries",
+            ),
+            Prefetch("forms", queryset=LexicalForm.objects.select_related(*FORM_SOURCE_RELATIONS)),
+            Prefetch("synonyms", queryset=LexicalSynonym.objects.select_related("target")),
+        )
     )
 
 
 def visible_lexical_entries(user):
-    return with_entry_details(LexicalEntry.objects.filter(visible_entry_filter(user)).distinct(), user)
+    return LexicalEntry.objects.filter(visible_entry_filter(user))
 
 
 class LexicalEntryFilter(FilterSet):
     search = CharFilter(method="filter_search")
+    # Words the user may change: their own, and unowned ones from before entries had owners.
+    editable = BooleanFilter(method="filter_editable")
+    # Look up the base form from a spelling variant or inflected form.
+    forms__form__iexact = CharFilter(method="filter_form")
+    # The words of one glossary. A word is in a glossary once, so the join repeats nothing.
+    glossaries = NumberFilter(field_name="glossaries")
 
     class Meta:
         model = LexicalEntry
@@ -62,32 +79,48 @@ class LexicalEntryFilter(FilterSet):
             "gender": ["exact"],
             "lemma": ["exact", "icontains"],
             "owner": ["exact"],
-            "glossaries": ["exact"],
-            # Look up the base form from a spelling variant or inflected form.
-            "forms__form": ["iexact"],
         }
 
     def filter_search(self, queryset, name, value):
-        """A word by any of its names: the lemma, a saved form, the modern form or the translation."""
+        """A word by what is written about it.
+
+        Its lemma, saved forms, synonyms, modern form, translation, definition and connotations.
+        Forms and synonyms are subqueries, so a word with several matching ones is still one row.
+        """
 
         value = value.strip()
         if not value:
             return queryset
+        forms = LexicalForm.objects.filter(entry=OuterRef("pk"), form__icontains=value)
+        synonyms = LexicalSynonym.objects.filter(entry=OuterRef("pk"), text__icontains=value)
         return queryset.filter(
             Q(lemma__icontains=value)
-            | Q(forms__form__icontains=value)
+            | Q(Exists(forms))
+            | Q(Exists(synonyms))
+            # Synonyms saved before they had a table of their own.
+            | Q(inflection_data__synonyms__icontains=value)
             | Q(inflection_data__modern_form__icontains=value)
             | Q(translation__icontains=value)
+            | Q(definition__icontains=value)
+            | Q(connotations__icontains=value)
         )
+
+    def filter_editable(self, queryset, name, value):
+        return editable_lexical_entries(queryset, self.request.user) if value else queryset
+
+    def filter_form(self, queryset, name, value):
+        return queryset.filter(Exists(LexicalForm.objects.filter(entry=OuterRef("pk"), form__iexact=value)))
 
 
 class LexicalEntryViewSet(viewsets.ModelViewSet):
     serializer_class = LexicalEntrySerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_class = LexicalEntryFilter
+    # A lexicon grows without limit, so the list is always read a page at a time.
+    pagination_class = StandardPagination
 
     def get_queryset(self):
-        return visible_lexical_entries(self.request.user)
+        return with_entry_details(visible_lexical_entries(self.request.user), self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -109,27 +142,46 @@ class LexicalEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def languages(self, request):
-        """The languages of the user's own words, with how many words each has."""
+        """The languages of the user's own words: how many words each has, and how many are marked for quizzes."""
 
         rows = (
-            LexicalEntry.objects.filter(owner=request.user)
+            LexicalEntry.objects.filter(own_entry_condition(request.user))
             .values("language")
-            .annotate(count=Count("id"))
+            .annotate(count=Count("id"), marked=Count("id", filter=marked_for_quiz(request.user)))
             .order_by("language")
         )
         return Response(list(rows))
 
     @action(detail=False, methods=["get"])
     def quiz(self, request):
-        """A random selection of the user's own words in one language for a vocabulary quiz."""
+        """A random selection of the user's own words in one language for a vocabulary quiz.
+
+        With ``marked``, only among the words the user has marked for quizzes.
+        """
 
         params = LanguageQuizSerializer(data=request.query_params)
         params.is_valid(raise_exception=True)
-        entries = with_entry_details(
-            LexicalEntry.objects.filter(owner=request.user, language=params.validated_data["language"]).order_by("?"),
-            request.user,
-        )[: params.validated_data["count"]]
+        entries = LexicalEntry.objects.filter(
+            own_entry_condition(request.user), language=params.validated_data["language"]
+        )
+        if params.validated_data["marked"]:
+            entries = entries.filter(quiz_users=request.user)
+        entries = with_entry_details(entries.order_by("?"), request.user)[: params.validated_data["count"]]
         return Response(LexicalEntrySerializer(entries, many=True, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=["put", "delete"], url_path="quiz-mark")
+    def quiz_mark(self, request, pk=None):
+        """Mark a word for the user's own quizzes (PUT) or remove the mark (DELETE).
+
+        Any word the user can see, since the mark is theirs and changes nothing about the word.
+        """
+
+        entry = self.get_object()
+        if request.method == "PUT":
+            entry.quiz_users.add(request.user)
+        else:
+            entry.quiz_users.remove(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class LexicalFormViewSet(viewsets.ModelViewSet):
@@ -139,6 +191,14 @@ class LexicalFormViewSet(viewsets.ModelViewSet):
         "entry": ["exact"],
         "form": ["exact", "iexact", "icontains"],
         "kind": ["exact"],
+        "grammatical_case": ["exact"],
+        "number": ["exact"],
+        "person": ["exact"],
+        "tense": ["exact"],
+        "mood": ["exact"],
+        "voice": ["exact"],
+        "degree": ["exact"],
+        "definiteness": ["exact"],
         "is_uncertain": ["exact"],
         "unit": ["exact"],
     }
@@ -146,7 +206,6 @@ class LexicalFormViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return (
             LexicalForm.objects.filter(visible_entry_filter(self.request.user, "entry__"))
-            .distinct()
             .select_related(*FORM_SOURCE_RELATIONS)
         )
 
@@ -183,13 +242,16 @@ class GlossaryViewSet(viewsets.ModelViewSet):
         return GlossarySerializer if self.action == "list" else GlossaryDetailSerializer
 
     def get_queryset(self):
+        """The glossaries the user can see, with the counts the action's serializer shows."""
+
         user = self.request.user
-        queryset = visible_to_user(Glossary.objects.all(), user).annotate(
-            entry_count=Count("entries", distinct=True)
-        )
-        if self.action not in ("list", "quiz"):
-            queryset = queryset.prefetch_related(
-                Prefetch("entries", queryset=with_entry_details(LexicalEntry.objects.all(), user))
+        queryset = visible_to_user(Glossary.objects.all(), user)
+        if self.action == "list":
+            return queryset.annotate(entry_count=Count("entries"))
+        if self.action in ("retrieve", "update", "partial_update"):
+            return queryset.annotate(
+                entry_count=Count("entries"),
+                marked_count=Count("entries", filter=marked_for_quiz(user, "entries")),
             )
         return queryset
 
@@ -226,7 +288,10 @@ class GlossaryViewSet(viewsets.ModelViewSet):
         glossary = self.get_object()
         params = GlossaryQuizSerializer(data=request.query_params)
         params.is_valid(raise_exception=True)
-        entries = with_entry_details(glossary.entries.order_by("?"), request.user)[: params.validated_data["count"]]
+        entries = glossary.entries.all()
+        if params.validated_data["marked"]:
+            entries = entries.filter(quiz_users=request.user)
+        entries = with_entry_details(entries.order_by("?"), request.user)[: params.validated_data["count"]]
         return Response(LexicalEntrySerializer(entries, many=True, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["delete"], url_path=r"entries/(?P<entry_id>\d+)")

@@ -1,9 +1,10 @@
 from rest_framework import serializers
 
-from opus.access import can_access_work
+from opus.access import can_access_work, can_edit_lexical_entry
 from opus.models import Annotation, TextUnit
 
 from .documents import _excerpt
+from .lexicon import synonym_payload
 
 
 class AnnotationSerializer(serializers.ModelSerializer):
@@ -48,6 +49,9 @@ class AnnotationSerializer(serializers.ModelSerializer):
         entry = obj.lexical_entry
         if entry is None:
             return None
+        can_edit = getattr(obj, "request_entry_can_edit", None)
+        if can_edit is None:
+            can_edit = can_edit_lexical_entry(entry, self.context["request"].user)
         return {
             "id": entry.id,
             "lemma": entry.lemma,
@@ -56,7 +60,11 @@ class AnnotationSerializer(serializers.ModelSerializer):
             "inflection_data": entry.inflection_data,
             "translation": entry.translation,
             "definition": entry.definition,
+            "connotations": entry.connotations,
+            "connotation_note": entry.connotation_note,
+            "synonyms": synonym_payload(entry),
             "owner": entry.owner_id,
+            "can_edit": can_edit,
         }
 
     def validate_unit(self, unit):

@@ -5,9 +5,11 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from opus.models import Annotation, Edition, ReadingProgress, TextUnit, Work
+from opus.models import Annotation, Edition, LexicalForm, ReadingProgress, TextUnit, Work
 from opus.access import visible_to_user
 from opus.serializers import ReadingProgressSerializer
+from opus.serializers.lexicon import synonym_payload
+from opus.services.glosses import attach_entry_permissions, entry_detail_prefetches
 
 
 def get_visible_work_or_404(user, work_id):
@@ -17,7 +19,25 @@ def get_visible_work_or_404(user, work_id):
         raise Http404 from exc
 
 
+def lexical_form_payload(form):
+    return {
+        "id": form.id,
+        "form": form.form,
+        "kind": form.kind,
+        "inflection": form.inflection,
+        **{name: getattr(form, name) for name in LexicalForm.GRAMMAR_FIELDS},
+        "is_uncertain": form.is_uncertain,
+    }
+
+
 def lexical_entry_payload(entry):
+    """A word as the reading view shows and edits it, without a request per word.
+
+    The entry must be loaded with ``opus.services.glosses.entry_detail_prefetches``: ``glossaries``
+    is read from ``request_glossaries``, and the reader saves it back, so it must never be guessed.
+    ``can_edit`` is ``request_can_edit`` from ``attach_entry_permissions``.
+    """
+
     return {
         "id": entry.id,
         "lemma": entry.lemma,
@@ -27,6 +47,12 @@ def lexical_entry_payload(entry):
         "inflection_data": entry.inflection_data,
         "translation": entry.translation,
         "definition": entry.definition,
+        "connotations": entry.connotations,
+        "connotation_note": entry.connotation_note,
+        "synonyms": synonym_payload(entry),
+        "glossaries": [glossary.id for glossary in entry.request_glossaries],
+        "forms": [lexical_form_payload(form) for form in entry.forms.all()],
+        "can_edit": entry.request_can_edit,
         "owner": entry.owner_id,
     }
 
@@ -73,16 +99,7 @@ def reading_unit_payload(unit):
                 "start_offset": gloss.start_offset,
                 "end_offset": gloss.end_offset,
                 "lexical_entry": lexical_entry_payload(gloss.entry),
-                "form": (
-                    {
-                        "id": gloss.form.id,
-                        "kind": gloss.form.kind,
-                        "inflection": gloss.form.inflection,
-                        "is_uncertain": gloss.form.is_uncertain,
-                    }
-                    if gloss.form
-                    else None
-                ),
+                "form": lexical_form_payload(gloss.form) if gloss.form else None,
             }
             for gloss in getattr(unit, "request_glosses", [])
         ],
@@ -118,6 +135,7 @@ class ReadingView(APIView):
                                 queryset=(
                                     Annotation.objects.filter(user=request.user)
                                     .select_related("lexical_entry")
+                                    .prefetch_related(*entry_detail_prefetches(request.user, "lexical_entry__"))
                                     .order_by("start_offset", "id")
                                 ),
                                 to_attr="request_annotations",
@@ -135,6 +153,10 @@ class ReadingView(APIView):
                 ),
             )
             .order_by("title", "id")
+        )
+        editions = list(editions)
+        attach_entry_permissions(
+            [unit for edition in editions for unit in edition.request_paragraphs], request.user
         )
         return Response(
             {

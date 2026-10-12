@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
 from verso.models import Booking, Expense, House, Venture, VentureTask
@@ -44,8 +47,20 @@ class HouseViewSetTests(APITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_dashboard_aggregates_data_for_the_selected_house(self):
-        Booking.objects.create(house=self.house, visitor='Guest', start_date='2026-01-01', end_date='2026-01-03')
-        venture = Venture.objects.create(name='Renovate kitchen', house=self.house)
+        today = timezone.localdate()
+        Booking.objects.create(
+            house=self.house, visitor='Past guest',
+            start_date=today - timedelta(days=10), end_date=today - timedelta(days=8),
+        )
+        Booking.objects.create(
+            house=self.house, visitor='Current guest',
+            start_date=today - timedelta(days=1), end_date=today + timedelta(days=1),
+        )
+        Booking.objects.create(
+            house=self.house, visitor='Future guest',
+            start_date=today + timedelta(days=10), end_date=today + timedelta(days=12),
+        )
+        venture =Venture.objects.create(name='Renovate kitchen', house=self.house)
         VentureTask.objects.create(venture=venture, name='Buy tiles', completed=True)
         Expense.objects.create(house=self.house, amount='150.00', date_incurred='2026-01-02')
         client = APIClient()
@@ -55,7 +70,10 @@ class HouseViewSetTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['house']['id'], self.house.pk)
-        self.assertEqual(len(response.data['bookings']), 1)
+        self.assertEqual(
+            [row['visitor'] for row in response.data['bookings']],
+            ['Current guest', 'Future guest'],
+        )
         self.assertEqual(len(response.data['ventures']), 1)
         self.assertEqual(response.data['ventures'][0]['finished_tasks_count'], 1)
         self.assertEqual(response.data['ventures'][0]['total_tasks_count'], 1)

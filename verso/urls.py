@@ -16,6 +16,7 @@ from verso.views import (
     DrawingViewSet,
     ExpenseViewSet,
     HouseViewSet,
+    IncomeViewSet,
     VentureTaskViewSet,
     VentureViewSet,
     UpdateViewSet,
@@ -31,7 +32,8 @@ router.register('check-outs', CheckOutViewSet, basename='checkout')
 router.register('ventures', VentureViewSet, basename='venture')
 router.register('venture-tasks', VentureTaskViewSet, basename='venturetask')
 router.register('expenses', ExpenseViewSet, basename='expense')
-router.register('updates', UpdateViewSet, basename='update')
+router.register('incomes', IncomeViewSet, basename='income')
+router.register('updates',UpdateViewSet, basename='update')
 router.register('drawings', DrawingViewSet, basename='drawing')
 router.register('drawing-pages', DrawingPageViewSet, basename='drawingpage')
 router.register('photos', PhotoViewSet, basename='photo')

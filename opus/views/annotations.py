@@ -1,10 +1,10 @@
-from django.db.models import Count, F, Q, TextField
+from django.db.models import Count, Exists, F, OuterRef, Q, TextField
 from django.db.models.functions import Coalesce, Lower, Substr
 from django_filters import CharFilter, FilterSet, NumberFilter
 from rest_framework import permissions, viewsets
 
-from opus.access import visible_to_user
-from opus.models import Annotation
+from opus.access import editable_lexical_entries, visible_to_user
+from opus.models import Annotation, LexicalEntry, LexicalSynonym
 from opus.serializers import AnnotationSerializer
 from origo.pagination import StandardPagination
 
@@ -33,11 +33,17 @@ class AnnotationFilter(FilterSet):
         value = value.strip()
         if not value:
             return queryset
-        return queryset.alias(target_text=_target_text()).filter(
+        # A subquery, so an entry with several matching synonyms does not repeat the annotation.
+        has_synonym = Exists(
+            LexicalSynonym.objects.filter(entry=OuterRef("lexical_entry"), text__icontains=value)
+        )
+        return queryset.alias(target_text=_target_text(), has_synonym=has_synonym).filter(
             Q(target_text__icontains=value)
             | Q(body__icontains=value)
             | Q(lexical_entry__definition__icontains=value)
             | Q(lexical_entry__inflection_data__modern_form__icontains=value)
+            | Q(has_synonym=True)
+            # Synonyms saved before they had a table of their own.
             | Q(lexical_entry__inflection_data__synonyms__icontains=value)
             | Q(unit__version__work__title__icontains=value)
             | Q(unit__version__title__icontains=value)
@@ -73,11 +79,15 @@ class AnnotationViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
+        user = self.request.user
+        entry = LexicalEntry.objects.filter(pk=OuterRef("lexical_entry"))
         return visible_to_user(
-            Annotation.objects.filter(user=self.request.user).select_related(
-                "unit__version__work", "unit__parent", "lexical_entry"
-            ),
-            self.request.user,
+            Annotation.objects.filter(user=user)
+            .select_related("unit__version__work", "unit__parent", "lexical_entry")
+            .prefetch_related("lexical_entry__synonyms__target")
+            # Whether the user may change the word the annotation defines; read by the serializer.
+            .annotate(request_entry_can_edit=Exists(editable_lexical_entries(entry, user))),
+            user,
             "unit__version__work__",
         )
 

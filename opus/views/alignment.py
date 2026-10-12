@@ -28,7 +28,7 @@ from opus.serializers import (
     AlignmentVersionSerializer,
 )
 from opus.services.alignment_grid import GAP, TEXT, Grid, GridError, reset as reset_alignment
-from opus.services.glosses import attach_glosses
+from opus.services.glosses import attach_entry_permissions, attach_glosses, entry_detail_prefetches
 from .lexicon import visible_entry_filter
 from .status import reading_unit_payload
 
@@ -115,12 +115,14 @@ def alignment_matrix_payload(alignment_set, user, offset=0, limit=DEFAULT_WINDOW
     for annotation in (
         Annotation.objects.filter(user=user, unit_id__in=unit_ids)
         .select_related("lexical_entry")
+        .prefetch_related(*entry_detail_prefetches(user, "lexical_entry__"))
         .order_by("start_offset", "id")
     ):
         annotations.setdefault(annotation.unit_id, []).append(annotation)
     for unit in units.values():
         unit.request_annotations = annotations.get(unit.id, [])
-    attach_glosses(units.values(), LexicalEntry.objects.filter(visible_entry_filter(user)).distinct(), user)
+    attach_glosses(units.values(), LexicalEntry.objects.filter(visible_entry_filter(user)), user)
+    attach_entry_permissions(units.values(), user)
     chapter_starts, empty_before = _chapter_markers(grid, rows_range, units)
 
     def unit_payload(unit_id):

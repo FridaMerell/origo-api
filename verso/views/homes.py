@@ -113,7 +113,11 @@ class HouseViewSet(viewsets.ModelViewSet):
             except ValueError:
                 return Response({'error': 'Invalid year parameter.'}, status=400)
 
-        bookings = Booking.objects.filter(house=house).order_by('start_date')
+        # Only ongoing and upcoming stays; the calendar fetches its own months
+        # from the bookings endpoint.
+        bookings = Booking.objects.filter(
+            house=house, end_date__gte=timezone.localdate()
+        ).order_by('start_date')
         booking_requests = BookingRequest.objects.filter(house=house)
         check_outs = CheckOut.objects.filter(booking__house=house)
         venture_expense_total = Expense.objects.filter(

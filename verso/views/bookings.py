@@ -9,10 +9,13 @@ from verso.serializers import BookingRequestSerializer, BookingSerializer, Check
 
 class BookingFilter(django_filters.FilterSet):
     future = django_filters.BooleanFilter(method='filter_future')
+    # Together these select every booking that overlaps the given date range.
+    ends_on_or_after = django_filters.DateFilter(field_name='end_date', lookup_expr='gte')
+    starts_on_or_before = django_filters.DateFilter(field_name='start_date', lookup_expr='lte')
 
     class Meta:
         model = Booking
-        fields = ['house', 'future']
+        fields = ['house', 'future', 'ends_on_or_after', 'starts_on_or_before']
 
     def filter_future(self, queryset, name, value):
         today = timezone.localdate()

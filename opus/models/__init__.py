@@ -12,7 +12,7 @@ from .alignment import (
 from .annotations import Annotation
 from .bibliography import BibliographyEntry
 from .documents import Bookmark, Excerpt, ReadingProgress
-from .lexicon import Glossary, LexicalEntry, LexicalForm
+from .lexicon import Glossary, LexicalEntry, LexicalForm, LexicalSynonym
 from .people import Author, AuthorAlias, AuthorIdentifier, WorkContributor
 from .planning import Edition, Shelf, SourceFile, TextUnit, Work
 
@@ -34,6 +34,7 @@ __all__ = [
     "Glossary",
     "LexicalEntry",
     "LexicalForm",
+    "LexicalSynonym",
     "ReadingProgress",
     "Shelf",
     "SourceFile",

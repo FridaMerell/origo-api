@@ -61,6 +61,30 @@ class BookingViewSetTests(APITestCase):
         self.assertEqual(ids, {future.pk})
         self.assertNotIn(past.pk, ids)
 
+    def test_overlap_filter_returns_bookings_touching_the_range(self):
+        before = Booking.objects.create(
+            house=self.house, visitor='Before', start_date='2026-01-01', end_date='2026-01-03',
+        )
+        spanning = Booking.objects.create(
+            house=self.house, visitor='Spanning', start_date='2026-01-28', end_date='2026-02-03',
+        )
+        inside = Booking.objects.create(
+            house=self.house, visitor='Inside', start_date='2026-02-10', end_date='2026-02-12',
+        )
+        after = Booking.objects.create(
+            house=self.house, visitor='After', start_date='2026-03-01', end_date='2026-03-02',
+        )
+
+        response = self.client.get(
+            '/api/verso/bookings/',
+            {'ends_on_or_after': '2026-02-01', 'starts_on_or_before': '2026-02-28'},
+        )
+
+        ids = {row['id'] for row in response.data}
+        self.assertEqual(ids, {spanning.pk, inside.pk})
+        self.assertNotIn(before.pk, ids)
+        self.assertNotIn(after.pk, ids)
+
 
 class BookingRequestViewSetTests(APITestCase):
     def setUp(self):

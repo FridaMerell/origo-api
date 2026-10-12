@@ -6,6 +6,7 @@ from .drawings import DrawingPageViewSet, DrawingViewSet
 from .expenses import ExpenseViewSet
 from .history import HistoryEventViewSet, PersonRelationViewSet, PersonViewSet
 from .homes import HouseViewSet
+from .incomes import IncomeViewSet
 from .photos import AlbumViewSet, PhotoViewSet, TagViewSet
 from .updates import UpdateViewSet
 from .ventures import VentureTaskViewSet, VentureViewSet
@@ -26,6 +27,7 @@ __all__ = [
     "DrawingViewSet",
     "ExpenseViewSet",
     "HouseViewSet",
+    "IncomeViewSet",
     "UpdateViewSet",
     "VentureTaskViewSet",
     "VentureViewSet",
