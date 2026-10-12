@@ -123,6 +123,7 @@ INSTALLED_APPS = [
     "verso",
     "apsis",
     "tempus",
+    "caelus",
 ]
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
