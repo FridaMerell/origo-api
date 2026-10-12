@@ -91,6 +91,9 @@ class AnnotationViewSet(viewsets.ModelViewSet):
             "unit__version__work__",
         )
 
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
     def list(self, request, *args, **kwargs):
         """A page of annotations, plus what the filters of the list need to know about all of them."""
 
