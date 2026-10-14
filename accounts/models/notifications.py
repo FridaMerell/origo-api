@@ -11,6 +11,7 @@ class Notification(models.Model):
         ("flux", "Flux"),
         ("tempus", "Tempus"),
         ("apsis", "Apsis"),
+        ("caelus", "Caelus"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")

@@ -12,8 +12,6 @@ A separate Next.js monorepo provides the frontends for these apps, served on
 their own subdomains, and stays signed in across them via a shared Django
 session cookie.
 
-Feature and API documentation lives in [`docs/`](docs/README.md).
-
 ## App structure
 
 - `accounts` — common ground shared by every app: a custom `User` model
@@ -38,9 +36,7 @@ subdomain. The session cookie is scoped to the shared root domain via
 domain defaults to `origo.test` and can be overridden with `ROOT_DOMAIN`.
 
 The frontend subdomains and permitted origins are derived from `DOMAINS`,
-`FRONTEND_SUBDOMAINS`, and the optional CORS/CSRF overrides. See
-[Operations and configuration](docs/tempus/operations.md) for the complete
-runtime configuration reference.
+`FRONTEND_SUBDOMAINS`, and the optional CORS/CSRF overrides.
 
 ## Requirements
 

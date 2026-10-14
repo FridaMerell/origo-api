@@ -67,14 +67,16 @@ class WebPushSubscriptionTestView(APIView):
     throttle_scope = "push-test"
 
     def post(self, request):
-        tenant = request.data.get("tenant") or "tempus"
+        """Push a test to the caller's devices in the app given as ``tenant``,
+        like a real notification from that app; without one, to every device."""
+        tenant = request.data.get("tenant") or None
         payload = {
             "title": "Testnotis",
             "body": "Pushnotiser fungerar.",
-            "url": tenant_root_url(tenant),
+            "url": tenant_root_url(tenant or "tempus"),
             "tag": "push-test",
             "notificationId": "test",
-            "icon": f"/{tenant}/icon.png",
+            "icon": f"/{tenant or 'tempus'}/icon.png",
         }
-        sent, _dead = send_payload_to_user(request.user, payload)
+        sent, _dead = send_payload_to_user(request.user, payload, tenant=tenant)
         return Response({"ok": True, "sent": sent})

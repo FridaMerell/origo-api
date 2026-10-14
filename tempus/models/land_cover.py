@@ -29,7 +29,7 @@ class LandCoverFetch(models.Model):
     (``services.openstreetmap.place_names_in_geometry``): one Overpass query
     for the padded area, so it is complete for the area. Lantmäteriet's
     Ortnamn Direkt cannot be queried by area, which is why it is not used
-    here (see docs/tempus/lantmateriet-ortnamn.md).
+    here.
     ``buildings`` (``services.lantmateriet.buildings_in_geometry``) IS an
     exact clip, like land cover/hydrography - Byggnad Direkt accepts an
     arbitrary search geometry, just tiled client-side to respect its

@@ -10,6 +10,7 @@ from accounts.serializers import NotificationSerializer
 NOTIFICATION_SUMMARY_LIMIT = 10
 
 
+
 class NotificationViewSet(mixins.ListModelMixin,
                           mixins.RetrieveModelMixin,
                           viewsets.GenericViewSet):
@@ -31,9 +32,16 @@ class NotificationViewSet(mixins.ListModelMixin,
             qs = qs.filter(is_read=False)
         return qs
 
+    def _own(self, request):
+        """The user's notifications, only those of one app when ``?domain=`` is
+        given, so each app shows its own and not the others'."""
+        qs = Notification.objects.filter(user=request.user)
+        domain = request.query_params.get('domain')
+        return qs.filter(domain=domain) if domain else qs
+
     @action(detail=False, methods=['get'])
     def summary(self, request):
-        qs = Notification.objects.filter(user=request.user).order_by('-created_at')
+        qs = self._own(request).order_by('-created_at')
         latest = qs[:NOTIFICATION_SUMMARY_LIMIT]
         return Response({
             'unread_count': qs.filter(is_read=False).count(),
@@ -50,7 +58,5 @@ class NotificationViewSet(mixins.ListModelMixin,
 
     @action(detail=False, methods=['post'], url_path='read-all')
     def read_all(self, request):
-        updated = Notification.objects.filter(
-            user=request.user, is_read=False,
-        ).update(is_read=True)
+        updated = self._own(request).filter(is_read=False).update(is_read=True)
         return Response({'marked_read': updated})

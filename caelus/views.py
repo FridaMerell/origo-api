@@ -2,7 +2,32 @@ from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from caelus.models import EventAlert
+from caelus.serializers import EventAlertSerializer
 from caelus.services import iau_mdc, noaa, smhi
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def event_alert(request):
+    """The current user's opt-in to warnings before notable sky events.
+
+    ``PUT`` with ``latitude`` and ``longitude`` opts in or moves the position;
+    ``DELETE`` opts out. ``GET`` is 404 while the user has not opted in.
+    """
+    alert = EventAlert.objects.filter(user=request.user).first()
+    if request.method == "GET":
+        if alert is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(EventAlertSerializer(alert).data)
+    if request.method == "DELETE":
+        if alert is not None:
+            alert.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    serializer = EventAlertSerializer(alert, data=request.data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save(user=request.user)
+    return Response(serializer.data)
 
 
 @api_view(["GET"])

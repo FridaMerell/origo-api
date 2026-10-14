@@ -19,7 +19,9 @@ class WebPushSubscription(models.Model):
     endpoint = models.URLField(max_length=512, unique=True)
     p256dh = models.CharField(max_length=255)
     auth = models.CharField(max_length=255)
-    tenant = models.CharField(max_length=32, blank=True)  # verso|flux|tempus|apsis
+    # The app the subscription was created in, blank on the root domain;
+    # notifications are only pushed to their own app.
+    tenant = models.CharField(max_length=32, blank=True)
     user_agent = models.CharField(max_length=400, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_success_at = models.DateTimeField(null=True, blank=True)

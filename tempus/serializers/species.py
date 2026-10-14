@@ -310,7 +310,7 @@ class SeasonalOverviewQuerySerializer(serializers.Serializer):
     """Filters for the species seasonal-overview endpoint."""
 
     # Omitted or null means the whole country - the Phenogram rows with no
-    # geo_area (see tempus.services.phenogram / docs/tempus/phenograms.md).
+    # geo_area (see tempus.services.phenogram).
     geo_area = serializers.PrimaryKeyRelatedField(
         queryset=GeoArea.objects.all(), required=False, allow_null=True, default=None
     )

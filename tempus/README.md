@@ -27,9 +27,7 @@ The first version provides models for:
 The app exposes these through Django REST Framework serializers and viewsets
 under `/api/tempus/`, a Django admin registration, background tasks
 (`django-tasks`), and a typed service boundary that calls SLU Artdatabanken's
-Dyntaxa, Artfakta, and Species Observation System APIs. See
-[`docs/tempus/`](../docs/tempus/README.md) for the API contract and feature
-documentation.
+Dyntaxa, Artfakta, and Species Observation System APIs.
 
 ## Domain model
 
@@ -315,9 +313,7 @@ shared cross-process request cooldown. Each product needs its own
 `Ocp-Apim-Subscription-Key`; a call made without the required configuration
 raises `ArtdatabankenConfigurationError`, and a non-success HTTP response
 raises `ArtdatabankenAPIError`. Base URLs, keys, timeouts, and the cooldown are
-set through environment variables — see
-[`docs/tempus/artdatabanken/authentication.md`](../docs/tempus/artdatabanken/authentication.md).
-OAuth (for protected SOS coordinates and Artportalen writes) is not
+set through environment variables. OAuth (for protected SOS coordinates and Artportalen writes) is not
 implemented.
 
 API requests must remain in the service layer and must never be added to model
@@ -364,6 +360,5 @@ python manage.py migrate
 2. Create initial phenophases through the project's chosen data-management
    process.
 3. Add route-corridor spatial queries.
-4. Add protected-SOS/Artportalen OAuth when access is granted (see
-   [`docs/tempus/artdatabanken/`](../docs/tempus/artdatabanken/README.md)).
+4. Add protected-SOS/Artportalen OAuth when access is granted.
 5. Extend the existing serializers and endpoints as their API contract evolves.

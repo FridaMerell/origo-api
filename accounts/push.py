@@ -17,7 +17,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 # Notification.domain is also the frontend subdomain for that product area.
-_DOMAIN_LABELS = {"verso": "Verso", "flux": "Flux", "tempus": "Tempus", "apsis": "Apsis"}
+_DOMAIN_LABELS = {"verso": "Verso", "flux": "Flux", "tempus": "Tempus", "apsis": "Apsis", "caelus": "Caelus"}
 
 PUSH_TTL = 86_400
 
@@ -97,12 +97,18 @@ def _deliver(subscription, payload):
     return True
 
 
-def send_payload_to_user(user, payload):
-    """Deliver ``payload`` to every active subscription of ``user``.
+def send_payload_to_user(user, payload, tenant=None):
+    """Deliver ``payload`` to the active subscriptions of ``user``.
 
-    Returns ``(sent, dead)`` counts.
+    With ``tenant``, only to the subscriptions created in that app, so each
+    installed app shows its own notifications and not the others'. Each app is
+    its own origin with its own service worker, so its subscriptions are its
+    own. Returns ``(sent, dead)`` counts.
     """
-    subscriptions = list(user.push_subscriptions.filter(is_active=True))
+    subscriptions = user.push_subscriptions.filter(is_active=True)
+    if tenant is not None:
+        subscriptions = subscriptions.filter(tenant=tenant)
+    subscriptions = list(subscriptions)
     sent = 0
     dead = 0
     for subscription in subscriptions:

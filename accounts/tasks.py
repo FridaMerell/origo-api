@@ -90,7 +90,11 @@ def send_notification_email_now(notification_pk, template_key="generic", context
         return {"sent": False, "reason": "notification_not_found"}
     if not notification.user.email:
         return {"sent": False, "reason": "recipient_has_no_email"}
-    if notification.user.push_subscriptions.filter(is_active=True).exists():
+    # Push only reaches the app the notification belongs to, so a subscription
+    # in another app does not stand in for the email.
+    if notification.user.push_subscriptions.filter(
+        is_active=True, tenant=notification.domain
+    ).exists():
         return {"sent": False, "reason": "active_push_subscription"}
     subject, text, html = _email_content(notification, template_key, context)
     result = _send_resend_email(
@@ -125,7 +129,9 @@ def send_web_push_for_notification(notification_pk):
     if notification is None:
         return {"sent": 0, "reason": "notification_not_found"}
     payload = build_notification_payload(notification)
-    sent, dead = send_payload_to_user(notification.user, payload)
+    sent, dead = send_payload_to_user(
+        notification.user, payload, tenant=notification.domain
+    )
     return {"sent": sent, "dead": dead}
 
 
