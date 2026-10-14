@@ -1,8 +1,19 @@
-from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework import permissions, status
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from caelus.services import noaa, smhi
+from caelus.services import iau_mdc, noaa, smhi
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def meteor_showers(request):
+    """Return the notable annual meteor showers, from the IAU MDC and IMO."""
+    try:
+        showers = iau_mdc.get_showers()
+    except iau_mdc.IauMdcAPIError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+    return Response(showers)
 
 
 @api_view(["GET"])
