@@ -3,6 +3,7 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 from apsis.tests import User
@@ -61,8 +62,11 @@ class Observation(models.Model):
     count = models.PositiveIntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    life_stage = models.TextField(null=True)
+    life_stage = models.TextField(null=True, blank=True)
     locale=models.ForeignKey(Locale, null=True, on_delete=models.SET_NULL)
+    # Paths of the photos in R2, under tempus/<user id>/<dyntaxa taxon id>/<observation id>/.
+    # Each photo's thumbnail lies beside it with "-thumb" before the extension.
+    photos = ArrayField(models.CharField(max_length=2000), default=list, blank=True)
     class Meta:
         ordering = ("-observed_at",)
         indexes = [models.Index(fields=("user", "observed_at"))]

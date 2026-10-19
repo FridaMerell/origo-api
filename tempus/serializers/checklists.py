@@ -1,4 +1,6 @@
 """Checklist and observation serializers."""
+from urllib.parse import urlsplit
+
 from rest_framework import serializers
 
 from tempus.models import Checklist, ChecklistItem, Observation, Species, SpeciesCategory
@@ -286,6 +288,7 @@ class ObservationSerializer(serializers.ModelSerializer):
             "count",
             "life_stage",
             "notes",
+            "photos",
             "created_at",
         ]
         read_only_fields = ["id", "user", "created_at", "checklist_names"]
@@ -310,12 +313,31 @@ class ObservationSerializer(serializers.ModelSerializer):
     def get_checklist_names(self, obj):
         return [item.checklist.name for item in obj.checklist_items.all()]
 
+    def validate_photos(self, value):
+        """Photos are uploaded into the observation's own folder, so they can only be set once it exists."""
+        if not value:
+            return value
+        if self.instance is None:
+            raise serializers.ValidationError("Photos can only be added to a saved observation.")
+        # Paths are tempus/<user>/<taxon>/<observation>/<file>. The taxon is not
+        # checked: photos stay in the old taxon's folder if the species changes.
+        observation = self.instance
+        user_folder = f"/tempus/{observation.user_id}/"
+        observation_folder = f"/{observation.pk}/"
+        for path in value:
+            folder = urlsplit(path).path
+            if user_folder not in folder or observation_folder not in folder:
+                raise serializers.ValidationError("Every photo must belong to this observation.")
+        return value
+
     def validate_location(self, value):
         return validate_geojson(value, "Point")
 
     def create(self, validated_data):
         items = validated_data.pop("checklist_items", [])
         user = validated_data.pop("user")
+        # validate_photos only lets an empty list through on create.
+        validated_data.pop("photos", None)
         if items:
             validated_data.pop("species")
             return record_checklist_sighting(
@@ -360,6 +382,7 @@ class PublicObservationSerializer(serializers.ModelSerializer):
             "count",
             "life_stage",
             "notes",
+            "photos",
             "created_at",
         ]
         read_only_fields = fields
