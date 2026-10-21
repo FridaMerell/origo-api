@@ -275,7 +275,10 @@ class LocaleViewSet(viewsets.ModelViewSet):
     serializer_class=LocaleSerializer
 
     def get_queryset(self):
-        return Locale.objects.filter(user=self.request.user)
+        # Anyone signed in may read public locales; only the owner may change one.
+        if self.action in ("update", "partial_update", "destroy"):
+            return Locale.objects.filter(user=self.request.user)
+        return Locale.objects.visible_to(self.request.user)
 
     def perform_create(self, serializer):
         return serializer.save(user=self.request.user)

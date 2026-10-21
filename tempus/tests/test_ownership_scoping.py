@@ -265,6 +265,7 @@ class LocaleObservationTests(APITestCase):
             user=self.other_user,
             name="Elsewhere",
             geometry=LOCALE_SQUARE,
+            is_private=True,
         )
         self.observation = Observation.objects.create(
             user=self.owner,

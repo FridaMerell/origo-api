@@ -7,7 +7,7 @@ from typing import Any
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Max, Prefetch
+from django.db.models import Case, Max, Prefetch, When
 
 from tempus.models import Checklist, ChecklistItem, Locale, Observation, SpeciesCategory
 from tempus.services.geo import point_in_multipolygon
@@ -87,26 +87,45 @@ def link_observation_to_checklists(observation: Observation) -> None:
         observation.checklist_items.add(*items)
 
 
+def _locales_for(user: AbstractBaseUser) -> list[Locale]:
+    """Locales an observation by ``user`` can belong to, the user's own first."""
+    return list(
+        Locale.objects.visible_to(user).order_by(
+            Case(When(user_id=user.pk, then=0), default=1), "pk"
+        )
+    )
+
+
+def _first_containing(location: dict[str, Any], locales: list[Locale]) -> Locale | None:
+    for locale in locales:
+        try:
+            if point_in_multipolygon(location, locale.geometry):
+                return locale
+        except (IndexError, KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def locale_containing(location: dict[str, Any], *, user: AbstractBaseUser) -> Locale | None:
+    """The locale ``location`` lies in: the user's own if any, else a public one."""
+    return _first_containing(location, _locales_for(user))
+
+
 def backfill_observation_locales(*, user: AbstractBaseUser) -> int:
     """Set ``locale`` on the user's observations that lack one but match one.
 
     Returns the number of observations updated.
     """
-    locales = list(Locale.objects.filter(user_id=user.pk))
+    locales = _locales_for(user)
     if not locales:
         return 0
 
     observations = Observation.objects.filter(user=user, locale__isnull=True)
     updated = []
     for observation in observations:
-        for locale in locales:
-            try:
-                if point_in_multipolygon(observation.location, locale.geometry):
-                    observation.locale = locale
-                    updated.append(observation)
-                    break
-            except (IndexError, KeyError, TypeError, ValueError):
-                continue
+        observation.locale = _first_containing(observation.location, locales)
+        if observation.locale is not None:
+            updated.append(observation)
 
     if updated:
         Observation.objects.bulk_update(updated, ["locale"])

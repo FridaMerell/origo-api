@@ -32,8 +32,17 @@ class GeoArea(models.Model):
 
 
 
+class LocaleQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        """Public locales plus the user's own private ones."""
+        return self.filter(models.Q(is_private=False) | models.Q(user=user))
+
+
 class Locale(models.Model):
     name=models.TextField()
     geometry=models.JSONField(default=dict)
     user=models.ForeignKey(User, on_delete=models.CASCADE)
-    
+    # Locales are public unless the owner actively marks them private.
+    is_private = models.BooleanField(default=False)
+
+    objects = LocaleQuerySet.as_manager()

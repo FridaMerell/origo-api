@@ -22,10 +22,14 @@ class GeoAreaSerializer(serializers.ModelSerializer):
 
 class LocaleSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+    editable = serializers.SerializerMethodField()
 
     class Meta:
         model = Locale
-        fields = ["id","name","geometry",  "user"]
+        fields = ["id","name","geometry",  "user", "is_private", "editable"]
+
+    def get_editable(self, locale):
+        return locale.user_id == self.context["request"].user.pk
 
 
     def validate_geometry(self, value):

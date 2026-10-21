@@ -10,6 +10,7 @@ from django_filters.rest_framework import (
     ChoiceFilter,
     DateFilter,
     FilterSet,
+    ModelChoiceFilter,
     UUIDFilter,
 )
 from rest_framework import permissions, viewsets
@@ -35,7 +36,6 @@ from tempus.models import (
     SpeciesCategoryMembership,
 )
 from tempus.services import checklists
-from tempus.services.geo import point_in_multipolygon, point_in_polygon
 
 
 class ObservationFilter(FilterSet):
@@ -102,10 +102,18 @@ class ObservationFilter(FilterSet):
         return queryset.order_by("-observed_at", "-created_at", "-pk")
 
 
+def _visible_locales(request):
+    return Locale.objects.visible_to(request.user)
+
+
 class PublicObservationFilter(ObservationFilter):
-    """Filters for the all-users observation list (no private checklist/locale filters)."""
+    """Filters for the all-users observation list (no private checklist filter).
+
+    ``locale`` only accepts public locales and the user's own private ones.
+    """
 
     checklist = None
+    locale = ModelChoiceFilter(queryset=_visible_locales)
 
     class Meta:
         model = Observation
@@ -213,57 +221,8 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
 
 
 
-class ObservationViewSet(viewsets.ModelViewSet):
-    serializer_class = ObservationSerializer
-    pagination_class = StandardPagination
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [permissions.IsAuthenticated]
-    filterset_class = ObservationFilter
-
-    def get_queryset(self):
-        return (
-            Observation.objects.filter(user=self.request.user)
-            .select_related("species")
-            .prefetch_related(
-                Prefetch(
-                    "checklist_items",
-                    queryset=ChecklistItem.objects.select_related("checklist"),
-                )
-            )
-            .order_by("-observed_at", "-created_at", "-pk")
-        )
-
-    def retrieve(self, request, *args, **kwargs):
-        """Own observations in full; other users' observations without private data."""
-        observation = get_object_or_404(
-            Observation.objects.select_related("species").prefetch_related(
-                Prefetch(
-                    "checklist_items",
-                    queryset=ChecklistItem.objects.select_related("checklist"),
-                )
-            ),
-            pk=kwargs["pk"],
-        )
-        if observation.user_id == request.user.pk:
-            serializer = self.get_serializer(observation)
-        else:
-            serializer = PublicObservationSerializer(
-                observation, context=self.get_serializer_context()
-            )
-        return Response(serializer.data)
-
-    def perform_create(self, serializer):
-        locales = Locale.objects.filter(user=self.request.user)
-        observed_in = None
-        location = serializer.validated_data.get("location", {})
-        for locale in locales:
-            try:
-                if point_in_multipolygon(location, locale.geometry):
-                    observed_in = locale
-            except (IndexError, KeyError, TypeError, ValueError):
-                continue
-
-        serializer.save(user=self.request.user, locale=observed_in)
+class ObservationCategoryActions:
+    """Category grouping over a viewset's own (filtered) observation queryset."""
 
     @action(detail=False, methods=["get"], url_path="by-category")
     def by_category(self, request):
@@ -369,6 +328,52 @@ class ObservationViewSet(viewsets.ModelViewSet):
         response.data["obs_count"] = response.data["count"]
         return response
 
+
+class ObservationViewSet(ObservationCategoryActions, viewsets.ModelViewSet):
+    serializer_class = ObservationSerializer
+    pagination_class = StandardPagination
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_class = ObservationFilter
+
+    def get_queryset(self):
+        return (
+            Observation.objects.filter(user=self.request.user)
+            .select_related("species")
+            .prefetch_related(
+                Prefetch(
+                    "checklist_items",
+                    queryset=ChecklistItem.objects.select_related("checklist"),
+                )
+            )
+            .order_by("-observed_at", "-created_at", "-pk")
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        """Own observations in full; other users' observations without private data."""
+        observation = get_object_or_404(
+            Observation.objects.select_related("species").prefetch_related(
+                Prefetch(
+                    "checklist_items",
+                    queryset=ChecklistItem.objects.select_related("checklist"),
+                )
+            ),
+            pk=kwargs["pk"],
+        )
+        if observation.user_id == request.user.pk:
+            serializer = self.get_serializer(observation)
+        else:
+            serializer = PublicObservationSerializer(
+                observation, context=self.get_serializer_context()
+            )
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        observed_in = checklists.locale_containing(
+            serializer.validated_data.get("location", {}), user=self.request.user
+        )
+        serializer.save(user=self.request.user, locale=observed_in)
+
     @action(detail=False, methods=["post"], url_path="sync-checklists")
     def sync_checklists(self, request):
         observations_linked, checklist_item_links_created = (
@@ -382,7 +387,7 @@ class ObservationViewSet(viewsets.ModelViewSet):
         )
 
 
-class PublicObservationViewSet(viewsets.ReadOnlyModelViewSet):
+class PublicObservationViewSet(ObservationCategoryActions, viewsets.ReadOnlyModelViewSet):
     """All observations from all users, readable by any signed-in user."""
 
     serializer_class = PublicObservationSerializer

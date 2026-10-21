@@ -177,8 +177,9 @@ class ChecklistSerializer(serializers.ModelSerializer):
         return route
 
     def validate_locale(self, locale):
-        if locale is not None and locale.user_id != self.context["request"].user.pk:
-            raise serializers.ValidationError("The locale does not belong to you.")
+        user = self.context["request"].user
+        if locale is not None and locale.is_private and locale.user_id != user.pk:
+            raise serializers.ValidationError("The locale is private.")
         return locale
 
     def backfill_observations(self, checklist):

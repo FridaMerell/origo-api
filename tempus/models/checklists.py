@@ -62,7 +62,7 @@ class Observation(models.Model):
     count = models.PositiveIntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    life_stage = models.TextField(null=True, blank=True)
+    life_stage = models.TextField(null=True)
     locale=models.ForeignKey(Locale, null=True, on_delete=models.SET_NULL)
     # Paths of the photos in R2, under tempus/<user id>/<dyntaxa taxon id>/<observation id>/.
     # Each photo's thumbnail lies beside it with "-thumb" before the extension.
