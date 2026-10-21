@@ -1,4 +1,5 @@
 """Species, phenogram, and follow views."""
+import re
 from datetime import date
 
 from django.db.models import (
@@ -102,6 +103,29 @@ class SpeciesFilter(FilterSet):
         ]
 
 
+class SpeciesSearchFilter(filters.SearchFilter):
+    """``SearchFilter`` that ranks matches by where the term starts.
+
+    Names starting with the term come first, then names where a later word
+    starts with it, then any other match - so "ek" gives Eksnabbvinge before
+    Mindre ekbock before Sarek. Within a rank the model's own ordering holds.
+    """
+
+    def filter_queryset(self, request, queryset, view):
+        queryset = super().filter_queryset(request, queryset, view)
+        term = " ".join(self.get_search_terms(request))
+        if not term:
+            return queryset
+        return queryset.annotate(
+            search_rank=Case(
+                When(swedish_name__istartswith=term, then=Value(0)),
+                When(swedish_name__iregex=rf"[\s-]{re.escape(term)}", then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        ).order_by("search_rank", *Species._meta.ordering)
+
+
 class SpeciesViewSet(SharedDataViewSet):
     # Cap on followed species shown when no status filter is given, so an
     # active watcher's out-of-season follows don't crowd the overview.
@@ -109,7 +133,7 @@ class SpeciesViewSet(SharedDataViewSet):
 
     queryset = Species.objects.all()
     serializer_class = SpeciesSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filter_backends = [DjangoFilterBackend, SpeciesSearchFilter]
     filterset_class = SpeciesFilter
     search_fields = ["swedish_name"]
     lookup_field = "dyntaxa_taxon_id"
@@ -138,7 +162,7 @@ class SpeciesViewSet(SharedDataViewSet):
             .prefetch_related(
                 Prefetch(
                     "categories",
-                    queryset=SpeciesCategory.objects.only("id", "stages").order_by("label"),
+                    queryset=SpeciesCategory.objects.only("id", "stages", "label", "taxon_id").order_by("label"),
                     to_attr="life_stage_categories",
                 ),
                 Prefetch(

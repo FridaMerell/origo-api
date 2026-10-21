@@ -200,6 +200,15 @@ class ChecklistViewSet(viewsets.ModelViewSet):
                 latest_observation_id=Subquery(observations.values("pk")[:1]),
             )
         )
+        # The register's search field takes a name or a Dyntaxa taxon number.
+        search = request.query_params.get("search", "").strip()
+        if search:
+            matches = Q(species__swedish_name__icontains=search) | Q(
+                species__scientific_name__icontains=search
+            )
+            if search.isdigit():
+                matches |= Q(species__dyntaxa_taxon_id=int(search))
+            queryset = queryset.filter(matches)
         page = self.paginate_queryset(queryset)
         serializer = ChecklistRegisterItemSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)

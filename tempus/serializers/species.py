@@ -39,6 +39,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
     is_notify = serializers.BooleanField(read_only=True, default=False)
     checklists = serializers.SerializerMethodField()
     stages = serializers.SerializerMethodField()
+    categories = serializers.SerializerMethodField()
 
     class Meta:
         model = Species
@@ -49,6 +50,7 @@ class SpeciesSerializer(serializers.ModelSerializer):
             "is_notify",
             "checklists",
             "stages",
+            "categories",
             "scientific_name",
             "swedish_name",
             "taxon_rank",
@@ -80,19 +82,57 @@ class SpeciesSerializer(serializers.ModelSerializer):
             for item in getattr(obj, "user_checklist_items", [])
         ]
 
-    def get_stages(self, obj):
-        """Return each applicable category life stage once, in category order."""
+    def _categories(self, obj):
         categories = getattr(obj, "life_stage_categories", None)
         if categories is None:
             categories = obj.categories.order_by("label")
+        return categories
 
+    def get_stages(self, obj):
+        """Return each applicable category life stage once, in category order."""
         return list(
             dict.fromkeys(
                 stage
-                for category in categories
+                for category in self._categories(obj)
                 for stage in category.stages
             )
         )
+
+    def _category_tree(self):
+        """``{pk: (parent_pk, taxon_id, label)}`` for every category, read once.
+
+        The serializer instance is shared by every row of a list response, so
+        this stays a single query however many species are serialized.
+        """
+        if not hasattr(self, "_category_tree_cache"):
+            self._category_tree_cache = {
+                pk: (parent_pk, taxon_id, label)
+                for pk, parent_pk, taxon_id, label in SpeciesCategory.objects.values_list(
+                    "pk", "parent_category_id", "taxon_id", "label"
+                )
+            }
+        return self._category_tree_cache
+
+    def get_categories(self, obj):
+        """The species' categories with their parent categories, each once.
+
+        Every direct category is preceded by its ancestors, top-level first,
+        so a parent is listed before the categories under it.
+        """
+        tree = self._category_tree()
+        ordered = {}
+        for category in self._categories(obj):
+            path = []
+            pk = category.pk
+            while pk is not None and pk in tree and pk not in path:
+                path.append(pk)
+                pk = tree[pk][0]
+            for pk in reversed(path):
+                ordered.setdefault(pk, tree[pk])
+        return [
+            {"taxon_id": taxon_id, "label": label}
+            for _parent, taxon_id, label in ordered.values()
+        ]
 
 
 
