@@ -12,9 +12,14 @@ import time
 from typing import Any, Callable
 
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import caches
+from django.utils.connection import ConnectionProxy
 
 from tempus.services import geo
+
+# Persistent PostgreSQL-backed cache (see CACHES["geodata"] in settings), not
+# the default cache: geodata must survive deploys and must not be evicted.
+cache = ConnectionProxy(caches, "geodata")
 
 _MISSING = object()
 

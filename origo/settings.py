@@ -225,11 +225,10 @@ if redis_url:
         }
     }
 else:
-    # DatabaseCache, not LocMemCache: the marktäcke/land-cover map cache is
-    # meant to be genuinely persistent (30-day TTL, see
-    # LANTMATERIET_MARKTACKE's MAP_CACHE_SECONDS above) — LocMemCache lives
-    # only in a single worker process's RAM and is gone on every restart or
-    # deploy, and is not shared between worker processes either. No Redis
+    # DatabaseCache, not LocMemCache: LocMemCache lives only in a single
+    # worker process's RAM and is gone on every restart or deploy, and is not
+    # shared between worker processes either. Geodata has its own cache
+    # (CACHES["geodata"] below). No Redis
     # here by choice; DatabaseCache uses the existing database instead of an
     # extra service. Requires the cache table to exist
     # (`manage.py createcachetable`, run once, outside this settings file).
@@ -243,6 +242,23 @@ else:
             },
         }
     }
+
+# Geodata (Lantmäteriet, Overpass, Trafikverket) gets its own cache, always in
+# PostgreSQL regardless of REDIS_URL: it must survive deploys and restarts and
+# never be evicted to make room for short-lived entries. Responses are stored
+# once and only refetched when their own timeout (a year for Lantmäteriet) runs
+# out. MAX_ENTRIES is set far above what the app produces so culling never
+# throws away valid data. `manage.py createcachetable` (release step) creates
+# the table.
+CACHES["geodata"] = {
+    "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+    "LOCATION": "tempus_geodata_cache",
+    "TIMEOUT": None,
+    "OPTIONS": {
+        "MAX_ENTRIES": int(os.environ.get("GEODATA_CACHE_MAX_ENTRIES", "5000000")),
+        "CULL_FREQUENCY": 10,
+    },
+}
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
 
@@ -480,7 +496,7 @@ LANTMATERIET_MARKTACKE = {
     "PASSWORD": os.environ.get("LANTMATERIET_MARKTACKE_PASSWORD"),
     "TIMEOUT": float(os.environ.get("LANTMATERIET_MARKTACKE_TIMEOUT", "15")),
     "MAP_CACHE_SECONDS": int(
-        os.environ.get("LANTMATERIET_MARKTACKE_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+        os.environ.get("LANTMATERIET_MARKTACKE_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 365))
     ),
     "MAP_PAGE_SIZE": int(os.environ.get("LANTMATERIET_MARKTACKE_MAP_PAGE_SIZE", "1000")),
     "MAP_MAX_FEATURES": int(os.environ.get("LANTMATERIET_MARKTACKE_MAP_MAX_FEATURES", "10000")),
@@ -503,7 +519,7 @@ LANTMATERIET_ADMINISTRATIVE_BOUNDARIES = {
     "TIMEOUT": float(os.environ.get("LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_TIMEOUT", "15")),
     "MAP_CACHE_SECONDS": int(
         os.environ.get(
-            "LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 30)
+            "LANTMATERIET_ADMINISTRATIVE_BOUNDARIES_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 365)
         )
     ),
     "MAP_PAGE_SIZE": int(
@@ -531,7 +547,7 @@ LANTMATERIET_HYDROGRAFI = {
     ),
     "TIMEOUT": float(os.environ.get("LANTMATERIET_HYDROGRAFI_TIMEOUT", "15")),
     "MAP_CACHE_SECONDS": int(
-        os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+        os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_CACHE_SECONDS", str(60 * 60 * 24 * 365))
     ),
     "MAP_PAGE_SIZE": int(os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_PAGE_SIZE", "1000")),
     "MAP_MAX_FEATURES": int(os.environ.get("LANTMATERIET_HYDROGRAFI_MAP_MAX_FEATURES", "10000")),
@@ -564,7 +580,7 @@ LANTMATERIET_ORTNAMN = {
     ),
     "TIMEOUT": float(os.environ.get("LANTMATERIET_ORTNAMN_TIMEOUT", "15")),
     "CACHE_SECONDS": int(
-        os.environ.get("LANTMATERIET_ORTNAMN_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+        os.environ.get("LANTMATERIET_ORTNAMN_CACHE_SECONDS", str(60 * 60 * 24 * 365))
     ),
 }
 
@@ -595,7 +611,7 @@ LANTMATERIET_BYGGNAD = {
     ),
     "TIMEOUT": float(os.environ.get("LANTMATERIET_BYGGNAD_TIMEOUT", "15")),
     "CACHE_SECONDS": int(
-        os.environ.get("LANTMATERIET_BYGGNAD_CACHE_SECONDS", str(60 * 60 * 24 * 30))
+        os.environ.get("LANTMATERIET_BYGGNAD_CACHE_SECONDS", str(60 * 60 * 24 * 365))
     ),
     "MAX_AREA_SQM": int(os.environ.get("LANTMATERIET_BYGGNAD_MAX_AREA_SQM", "1000000")),
     "MAX_PERIMETER_M": int(os.environ.get("LANTMATERIET_BYGGNAD_MAX_PERIMETER_M", "200000")),
