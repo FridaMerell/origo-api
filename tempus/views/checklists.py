@@ -2,9 +2,16 @@
 import uuid
 from urllib.parse import urlsplit, urlunsplit
 
-from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Subquery
 from django.shortcuts import get_object_or_404
-from django_filters.rest_framework import CharFilter, FilterSet, UUIDFilter
+from django_filters.rest_framework import (
+    BooleanFilter,
+    CharFilter,
+    ChoiceFilter,
+    DateFilter,
+    FilterSet,
+    UUIDFilter,
+)
 from rest_framework import permissions, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action
@@ -35,28 +42,64 @@ class ObservationFilter(FilterSet):
     """Filters for a user's observations."""
 
     checklist = UUIDFilter(field_name="checklist_items__checklist_id")
-    # Accepts either a Species UUID (primary key) or a Dyntaxa taxon id.
+    # Comma-separated Species UUIDs (primary keys) and/or Dyntaxa taxon ids.
     species = CharFilter(method="filter_species")
+    # A species category the observed species is a direct member of.
+    category = UUIDFilter(method="filter_category")
+    observed_from = DateFilter(field_name="observed_at", lookup_expr="date__gte")
+    observed_to = DateFilter(field_name="observed_at", lookup_expr="date__lte")
+    life_stage = CharFilter(field_name="life_stage", lookup_expr="icontains")
+    has_photos = BooleanFilter(method="filter_has_photos")
+    ordering = ChoiceFilter(
+        choices=[("-observed_at", "Nyast först"), ("observed_at", "Äldst först")],
+        method="filter_ordering",
+    )
 
     class Meta:
         model = Observation
         fields = ["species", "checklist_items", "locale"]
 
     def filter_species(self, queryset, name, value):
-        value = value.strip()
-        if not value:
+        species_ids = []
+        taxon_ids = []
+        for part in value.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                species_ids.append(uuid.UUID(part))
+                continue
+            except (ValueError, AttributeError):
+                pass
+            if not part.isdigit():
+                raise ValidationError(
+                    {"species": "Ange Species-UUID eller Dyntaxa-taxon-id, kommaseparerade."}
+                )
+            taxon_ids.append(int(part))
+        if not species_ids and not taxon_ids:
             return queryset
-        try:
-            uuid.UUID(value)
-        except (ValueError, AttributeError):
-            pass
-        else:
-            return queryset.filter(species_id=value)
-        if value.isdigit():
-            return queryset.filter(species__dyntaxa_taxon_id=int(value))
-        raise ValidationError(
-            {"species": "Ange ett Species-UUID eller ett Dyntaxa-taxon-id."}
+        return queryset.filter(
+            Q(species_id__in=species_ids) | Q(species__dyntaxa_taxon_id__in=taxon_ids)
         )
+
+    def filter_category(self, queryset, name, value):
+        return queryset.filter(
+            Exists(
+                SpeciesCategoryMembership.objects.filter(
+                    species_id=OuterRef("species_id"), category_id=value
+                )
+            )
+        )
+
+    def filter_has_photos(self, queryset, name, value):
+        if value is None:
+            return queryset
+        return queryset.exclude(photos=[]) if value else queryset.filter(photos=[])
+
+    def filter_ordering(self, queryset, name, value):
+        if value == "observed_at":
+            return queryset.order_by("observed_at", "created_at", "pk")
+        return queryset.order_by("-observed_at", "-created_at", "-pk")
 
 
 class PublicObservationFilter(ObservationFilter):
@@ -187,6 +230,7 @@ class ObservationViewSet(viewsets.ModelViewSet):
                     queryset=ChecklistItem.objects.select_related("checklist"),
                 )
             )
+            .order_by("-observed_at", "-created_at", "-pk")
         )
 
     def retrieve(self, request, *args, **kwargs):
