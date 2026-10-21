@@ -369,6 +369,9 @@ class ObservationViewSet(ObservationCategoryActions, viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def perform_create(self, serializer):
+        if "locale" in serializer.validated_data:
+            serializer.save(user=self.request.user)
+            return
         observed_in = checklists.locale_containing(
             serializer.validated_data.get("location", {}), user=self.request.user
         )

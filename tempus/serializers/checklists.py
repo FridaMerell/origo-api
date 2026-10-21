@@ -261,7 +261,11 @@ class ObservationSpeciesDetailSerializer(serializers.ModelSerializer):
 
 class ObservationSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
-    locale = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Omitted on create, the locale is derived from ``location``; when sent it is
+    # kept as chosen, even if the position lies just outside the locale.
+    locale = serializers.PrimaryKeyRelatedField(
+        queryset=Locale.objects.all(), allow_null=True, required=False
+    )
     species = SpeciesReferenceField(
         queryset=Species.objects.all(),
         style={"base_template": "input.html"},
@@ -333,6 +337,12 @@ class ObservationSerializer(serializers.ModelSerializer):
 
     def validate_location(self, value):
         return validate_geojson(value, "Point")
+
+    def validate_locale(self, locale):
+        user = self.context["request"].user
+        if locale is not None and locale.is_private and locale.user_id != user.pk:
+            raise serializers.ValidationError("The locale is private.")
+        return locale
 
     def create(self, validated_data):
         items = validated_data.pop("checklist_items", [])

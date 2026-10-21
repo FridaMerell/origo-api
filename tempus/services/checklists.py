@@ -13,14 +13,19 @@ from tempus.models import Checklist, ChecklistItem, Locale, Observation, Species
 from tempus.services.geo import point_in_multipolygon
 
 
-def checklist_location_matches(*, checklist: Checklist, location: dict[str, Any]) -> bool:
+def checklist_location_matches(
+    *, checklist: Checklist, location: dict[str, Any], locale_id: Any = None
+) -> bool:
     """Return whether ``location`` satisfies a checklist's optional areas.
 
     A locale and a GeoArea are alternative scopes. A checklist without either
-    remains unrestricted by location.
+    remains unrestricted by location. An observation logged to the checklist's
+    locale (``locale_id``) matches even when its position lies outside it.
     """
     areas = (checklist.locale, checklist.geo_area)
     if not any(areas):
+        return True
+    if locale_id is not None and checklist.locale_id == locale_id:
         return True
 
     for area in areas:
@@ -40,6 +45,7 @@ def matching_checklist_items(
     species_id: Any,
     observed_at: datetime,
     location: dict[str, Any],
+    locale_id: Any = None,
     checklist: Checklist | None = None,
 ) -> list[ChecklistItem]:
     """Checklist items on this user's checklists that the observation satisfies.
@@ -47,7 +53,7 @@ def matching_checklist_items(
     Only checklist items with automatic adding enabled are considered. Matches
     require the same species, an observation date within the optional checklist
     date range, and, when set, a location inside the checklist's Locale or
-    GeoArea.
+    GeoArea, or the observation logged to the checklist's Locale.
     """
     observed_date = observed_at.date()
     items = (
@@ -70,7 +76,9 @@ def matching_checklist_items(
             continue
         if end and observed_date > end:
             continue
-        if checklist_location_matches(checklist=candidate, location=location):
+        if checklist_location_matches(
+            checklist=candidate, location=location, locale_id=locale_id
+        ):
             matches.append(item)
     return matches
 
@@ -82,6 +90,7 @@ def link_observation_to_checklists(observation: Observation) -> None:
         species_id=observation.species_id,
         observed_at=observation.observed_at,
         location=observation.location,
+        locale_id=observation.locale_id,
     )
     if items:
         observation.checklist_items.add(*items)
@@ -184,6 +193,7 @@ def sync_observations_to_checklists(
             if not checklist_location_matches(
                 checklist=candidate,
                 location=observation.location,
+                locale_id=observation.locale_id,
             ):
                 continue
             matches.append(item)
