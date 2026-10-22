@@ -1,5 +1,6 @@
 """Checklist and observation views."""
 import uuid
+from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Subquery
@@ -35,7 +36,7 @@ from tempus.models import (
     SpeciesCategory,
     SpeciesCategoryMembership,
 )
-from tempus.services import checklists
+from tempus.services import checklists, year_summary
 
 
 class ObservationFilter(FilterSet):
@@ -385,6 +386,18 @@ class ObservationViewSet(ObservationCategoryActions, viewsets.ModelViewSet):
             serializer.validated_data.get("location", {}), user=self.request.user
         )
         serializer.save(user=self.request.user, locale=observed_in)
+
+    @action(detail=False, methods=["get"], url_path="year-summary")
+    def year_summary(self, request):
+        """The signed-in user's year: ``?year=YYYY``, the current year by default."""
+        raw_year = request.query_params.get("year")
+        if raw_year is None:
+            year = datetime.now(year_summary.STOCKHOLM).year
+        elif raw_year.isdigit() and 1900 <= int(raw_year) <= 9999:
+            year = int(raw_year)
+        else:
+            raise ValidationError({"year": "Ange ett årtal, till exempel 2026."})
+        return Response(year_summary.year_summary(user=request.user, year=year))
 
     @action(detail=False, methods=["post"], url_path="sync-checklists")
     def sync_checklists(self, request):
