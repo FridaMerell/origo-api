@@ -543,6 +543,96 @@ def fetch_locale_land_cover(locale_pk, *, buffer_metres=LOCALE_LAND_COVER_BUFFER
     )
 
 
+# A species takes about 25 grid calls (one per month plus the group choice),
+# which the Artdatabanken client sends one at a time with a pause between:
+# some 35 seconds each, so a batch holds the worker for about twelve minutes.
+SPECIES_SIGNIFICANCE_BATCH = 20
+# The next run is queued when this one ends, so runs never overlap however
+# long a batch takes.
+SPECIES_SIGNIFICANCE_INTERVAL = timedelta(minutes=1)
+# A measured species is measured again after this long; one Artdatabanken
+# could not measure (or that failed) waits SPECIES_SIGNIFICANCE_RETRY.
+SPECIES_SIGNIFICANCE_REFRESH = timedelta(days=90)
+SPECIES_SIGNIFICANCE_RETRY = timedelta(days=7)
+# With nothing left to measure the chain looks again this much later.
+SPECIES_SIGNIFICANCE_IDLE = timedelta(hours=6)
+# Bumped when the measure changes, so every species is measured again.
+SPECIES_SIGNIFICANCE_VERSION = 3
+
+
+def _significance_mark(species_pk) -> str:
+    return f"tempus:species_significance:v{SPECIES_SIGNIFICANCE_VERSION}:{species_pk}"
+
+
+@task()
+def fill_species_significance():
+    """Measure ``Species.significance`` (rarity among the species' relatives,
+    see :func:`phenogram.refresh_species_significance`), then reschedule.
+
+    Self-scheduling: each run measures at most ``SPECIES_SIGNIFICANCE_BATCH``
+    species not measured within ``SPECIES_SIGNIFICANCE_REFRESH`` (failures
+    within ``SPECIES_SIGNIFICANCE_RETRY``), observed ones first, and
+    re-enqueues itself ``SPECIES_SIGNIFICANCE_INTERVAL`` later, or
+    ``SPECIES_SIGNIFICANCE_IDLE`` later when nothing was left. A missing
+    Artdatabanken configuration ends the run early but keeps the chain going.
+    """
+    from django.core.cache import cache
+    from django.db.models import Exists, OuterRef
+
+    from tempus.models import Observation, Species
+
+    candidates = (
+        Species.objects.exclude(swedish_name="")
+        .annotate(observed=Exists(Observation.objects.filter(species_id=OuterRef("pk"))))
+        .order_by("-observed", "pk")
+        .only("pk", "dyntaxa_taxon_id", "parent_dyntaxa_taxon_id", "swedish_name")
+    )
+    batch = []
+    chunk = []
+
+    def take(rows):
+        marked = cache.get_many([_significance_mark(row.pk) for row in rows])
+        batch.extend(row for row in rows if _significance_mark(row.pk) not in marked)
+
+    for species in candidates.iterator(chunk_size=500):
+        chunk.append(species)
+        if len(chunk) == 500:
+            take(chunk)
+            chunk = []
+            if len(batch) >= SPECIES_SIGNIFICANCE_BATCH:
+                break
+    if chunk and len(batch) < SPECIES_SIGNIFICANCE_BATCH:
+        take(chunk)
+    batch = batch[:SPECIES_SIGNIFICANCE_BATCH]
+
+    filled = failed = unmeasured = 0
+    for species in batch:
+        try:
+            value = phenogram.refresh_species_significance(species)
+        except artdatabanken.ArtdatabankenConfigurationError as exc:
+            logger.warning("fill_species_significance: not configured: %s", exc)
+            break
+        except artdatabanken.ArtdatabankenAPIError as exc:
+            failed += 1
+            logger.warning("fill_species_significance(%s) failed: %s", species.pk, exc)
+            cache.set(_significance_mark(species.pk), True, int(SPECIES_SIGNIFICANCE_RETRY.total_seconds()))
+            continue
+        if value is None:
+            unmeasured += 1
+            cache.set(_significance_mark(species.pk), True, int(SPECIES_SIGNIFICANCE_RETRY.total_seconds()))
+        else:
+            filled += 1
+            cache.set(_significance_mark(species.pk), True, int(SPECIES_SIGNIFICANCE_REFRESH.total_seconds()))
+
+    logger.info(
+        "fill_species_significance: measured %d, too thin %d, failed %d",
+        filled, unmeasured, failed,
+    )
+    delay = SPECIES_SIGNIFICANCE_INTERVAL if batch else SPECIES_SIGNIFICANCE_IDLE
+    fill_species_significance.using(run_after=timezone.now() + delay).enqueue()
+    return {"measured": filled, "too_thin": unmeasured, "failed": failed}
+
+
 BIRDNET_RETENTION = timedelta(hours=24)
 BIRDNET_PURGE_INTERVAL = timedelta(hours=1)
 

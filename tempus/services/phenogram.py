@@ -224,6 +224,166 @@ def _significance(species, geo_area, curve):
     return value, basis
 
 
+# Species.significance is a species' rarity among its relatives, so that a
+# group few people report (moths) is not mistaken for a rare one. It is
+# measured within these Dyntaxa ranks (taxon category ids), narrowest first:
+# family, order, class. Never above class: that would be all reporting again.
+REFERENCE_RANKS = (11, 8, 5)
+# A reference group with fewer occupied cells than this is too thin to measure
+# against, and the next rank up is used instead.
+REFERENCE_MIN_CELLS = 200
+# Nor does a group say anything when the species itself fills most of it (a
+# family with one Swedish species): above this share the next rank up is used.
+REFERENCE_MAX_SHARE = 0.75
+# Parents and ranks hardly ever change in Dyntaxa.
+LINEAGE_CACHE_TTL = 30 * 24 * 60 * 60
+# The value counts occupied cell+month pairs over this many whole months, so a
+# species found everywhere but seldom (capercaillie) is not taken for common.
+SEASON_MONTHS = 24
+# The group is counted only in the species' own months, so a migrant is not
+# made rare by the winter it spends abroad. A month is the species' own when it
+# fills at least this share of its busiest month's cells; a stray winter record
+# does not open the whole winter.
+SEASON_SHARE = 0.10
+# A past month's cell count does not change, so a group's is kept this long.
+SEASON_CACHE_TTL = 30 * 24 * 60 * 60
+
+
+def _grid_timeout() -> float:
+    from django.conf import settings
+
+    return float((getattr(settings, "ARTDATABANKEN", {}) or {}).get("PHENOGRAM_TIMEOUT", 60))
+
+
+def _parent_and_rank(taxon_id: int) -> tuple[int | None, int | None]:
+    """A Dyntaxa taxon's parent id and rank id, cached across species."""
+    key = f"tempus:dyntaxa_lineage:{taxon_id}"
+    hit = cache.get(key)
+    if hit is None:
+        taxon = artdatabanken.get_taxon(taxon_id)
+        category = (taxon.get("api_data") or {}).get("category") or {}
+        hit = [taxon.get("parent_dyntaxa_taxon_id"), category.get("id") if isinstance(category, dict) else None]
+        cache.set(key, hit, LINEAGE_CACHE_TTL)
+    parent, rank = hit
+    return (int(parent) if parent else None), (int(rank) if rank is not None else None)
+
+
+def reference_groups(species) -> list[int]:
+    """The species' family, order and class as Dyntaxa taxon ids, narrowest
+    first; a rank missing from its lineage is skipped. Stops at class."""
+    parent = species.parent_dyntaxa_taxon_id or _parent_and_rank(species.dyntaxa_taxon_id)[0]
+    groups: list[int] = []
+    seen = {species.dyntaxa_taxon_id}
+    while parent and parent not in seen:
+        seen.add(parent)
+        grandparent, rank = _parent_and_rank(parent)
+        if rank in REFERENCE_RANKS:
+            groups.append(parent)
+            if rank == REFERENCE_RANKS[-1]:
+                break
+        parent = grandparent
+    return groups
+
+
+def _taxon_cells(taxon_id: int, date: dict) -> int:
+    """Occupied grid cells in the whole country for a taxon and its underlying taxa."""
+    flt = {
+        "date": date,
+        "occurrenceStatus": "Present",
+        "taxon": {"ids": [int(taxon_id)], "includeUnderlyingTaxa": True},
+    }
+    return _occupied_cells(
+        artdatabanken.geo_grid_aggregation(flt, zoom=SIGNIFICANCE_GRID_ZOOM, timeout=_grid_timeout())
+    )
+
+
+def _season_months(today: datetime.date) -> list[dict]:
+    """Date filters for the last :data:`SEASON_MONTHS` whole months, oldest first."""
+    months = []
+    end = today.replace(day=1)
+    for _ in range(SEASON_MONTHS):
+        start = (end - datetime.timedelta(days=1)).replace(day=1)
+        months.append({
+            "startDate": start.isoformat(),
+            "endDate": (end - datetime.timedelta(days=1)).isoformat(),
+            "dateFilterType": "BetweenStartDateAndEndDate",
+        })
+        end = start
+    return months[::-1]
+
+
+def _cached_cells(key: str, taxon_id: int, date: dict, timeout: int) -> int:
+    cells = cache.get(key)
+    if cells is None:
+        cells = _taxon_cells(taxon_id, date)
+        cache.set(key, cells, timeout)
+    return cells
+
+
+def _reference_group(species, groups: list[int], date: dict) -> int | None:
+    """The narrowest group wide enough to measure against: at least
+    :data:`REFERENCE_MIN_CELLS` cells, with the species in at most
+    :data:`REFERENCE_MAX_SHARE` of them. A species too common for every group
+    is measured against the widest one that is not too thin."""
+    species_cells = _taxon_cells(species.dyntaxa_taxon_id, date)
+    widest = None
+    for group in groups:
+        key = f"tempus:sig_group:{group}:{date['startDate']}:{date['endDate']}:{SIGNIFICANCE_GRID_ZOOM}"
+        group_cells = _cached_cells(key, group, date, SIGNIFICANCE_AREA_CACHE_TTL)
+        if group_cells < REFERENCE_MIN_CELLS:
+            continue
+        if species_cells <= group_cells * REFERENCE_MAX_SHARE:
+            return group
+        widest = group
+    return widest
+
+
+def refresh_species_significance(species, *, years: int = DEFAULT_YEARS, today: datetime.date | None = None):
+    """Compute and store ``Species.significance`` - how rare a report of this
+    species is among reports of its relatives - without building a phenogram.
+
+    The reference group is the species' family (or order, or class, when the
+    narrower group is too thin or mostly the species itself; see
+    :data:`REFERENCE_RANKS` and :func:`_reference_group`), chosen on occupied
+    cells over the last ``years`` calendar years. The value then sets the
+    species' occupied cell+month pairs over the last :data:`SEASON_MONTHS`
+    whole months against the group's in the same months, counting only the
+    months the species is about (:data:`SEASON_SHARE`). That is one grid call
+    per month for the species; the group's are cached across its species.
+    Red-list status is not folded in; readers add it
+    (``diversity.RED_LIST_BUMP``). Returns the value, or ``None`` when no group
+    is wide enough to measure against; the stored value is then left as it was.
+    """
+    from tempus.models import Species
+
+    years = max(1, min(int(years), MAX_YEARS))
+    today = today or datetime.date.today()
+    groups = reference_groups(species)
+    if not groups:
+        return None
+    group = _reference_group(species, groups, _date_filter(years, today=today))
+    if group is None:
+        return None
+
+    months = _season_months(today)
+    own = [_taxon_cells(species.dyntaxa_taxon_id, month) for month in months]
+    # With no record at all every month counts, and the species reads as rare.
+    floor = max(own) * SEASON_SHARE
+    season = [i for i, cells in enumerate(own) if cells >= floor]
+    group_cells = sum(
+        _cached_cells(
+            f"tempus:sig_month:{group}:{months[i]['startDate']}:{SIGNIFICANCE_GRID_ZOOM}",
+            group, months[i], SEASON_CACHE_TTL,
+        )
+        for i in season
+    )
+    value = diversity.significance_from_cells(sum(own[i] for i in season), group_cells)
+    if value is None:
+        return None
+    Species.objects.filter(pk=species.pk).update(significance=value)
+    return value
+
+
 def get_phenogram(
     species,
     geo_area=None,
@@ -241,7 +401,7 @@ def get_phenogram(
     instead, getting ``None`` until the worker has run. Never triggered by a
     plain read.
     """
-    from tempus.models import Phenogram, Species
+    from tempus.models import Phenogram
 
     years = max(1, min(int(years), MAX_YEARS))
     existing = Phenogram.objects.filter(
@@ -271,14 +431,12 @@ def get_phenogram(
             "significance for %s / %s skipped: %s", species, geo_area or "range", exc
         )
 
+    # Species.significance is measured against the species' relatives by
+    # refresh_species_significance, so this whole-range value is not copied there.
     row, _ = Phenogram.objects.update_or_create(
         species=species,
         geo_area=geo_area,
         years=years,
         defaults=defaults,
     )
-    if geo_area is None and defaults.get("significance") is not None:
-        Species.objects.filter(pk=species.pk).update(
-            significance=defaults["significance"]
-        )
     return row

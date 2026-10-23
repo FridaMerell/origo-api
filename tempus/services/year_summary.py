@@ -14,11 +14,18 @@ from django.db.models import Count, Exists, F, Min, OuterRef, Subquery
 from django.db.models.functions import ExtractMonth, ExtractYear
 
 from tempus.models import Observation
+from tempus.services.diversity import RED_LIST_BUMP
 from tempus.services.geo import haversine_m
 from tempus.services.route_planner import _redlist_code
 
 STOCKHOLM = ZoneInfo("Europe/Stockholm")
 PHOTO_LIMIT = 12
+
+
+def _rarity(row: dict) -> float:
+    """A species' rarity among its relatives with its red-list status added, as
+    the route planner weighs it (``diversity.RED_LIST_BUMP``)."""
+    return min(1.0, row["significance"] + RED_LIST_BUMP.get(row["red_list_category"], 0.0))
 
 
 def observed_years(*, user: AbstractBaseUser) -> list[int]:
@@ -73,7 +80,7 @@ def year_summary(*, user: AbstractBaseUser, year: int) -> dict:
         species=species,
         new_species_count=sum(row["is_new"] for row in species),
         red_listed_count=sum(bool(row["red_list_category"]) for row in species),
-        rarest=max(rated, key=lambda row: row["significance"]) if rated else None,
+        rarest=max(rated, key=_rarity) if rated else None,
         photos=_photos(observations),
         points=[point["coordinates"] for point in points],
         extremes=_extremes(points),

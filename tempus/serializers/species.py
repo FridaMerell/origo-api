@@ -159,6 +159,24 @@ class RegisterSpeciesSerializer(serializers.Serializer):
     dyntaxa_taxon_id = serializers.IntegerField(min_value=1)
 
 
+class RegisterSpeciesBatchSerializer(serializers.Serializer):
+    """Input for queueing a hand-picked set of taxa for registration."""
+
+    MAX_TAXA = 200
+
+    species_category = serializers.PrimaryKeyRelatedField(
+        queryset=SpeciesCategory.objects.all()
+    )
+    dyntaxa_taxon_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+        max_length=MAX_TAXA,
+    )
+
+    def validate_dyntaxa_taxon_ids(self, value):
+        return list(dict.fromkeys(value))
+
+
 class SpeciesChecklistImportSerializer(serializers.Serializer):
     """Input for queueing every taxon ID in an uploaded species checklist."""
 

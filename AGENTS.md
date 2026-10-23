@@ -28,13 +28,11 @@ Keep the corresponding private Flux project current for every implementation
 change. This applies in every chat working in this repository, without the
 user needing to repeat the request. Update the actual Flux design entities,
 fields, relations, resources, roles, screens, and documents that are affected;
-updating only a narrative document is not sufficient. Before reporting a
-change as complete, read the Flux project back and verify that every affected
-design artifact reflects the implemented state. If the dedicated Codex API
-lacks a safe update operation, implement that operation in the Flux Codex API
-as part of the change and clearly report that a deployment is required before
-the live project can be synchronized. Never create duplicate design entities
-as a substitute for updating an existing one.
+updating only a narrative document is not sufficient. If the dedicated Codex
+API lacks a safe update operation, implement that operation in the Flux Codex
+API as part of the change and clearly report that a deployment is required
+before the live project can be synchronized. Never create duplicate design
+entities as a substitute for updating an existing one.
 
 - The live API base URL is supplied through `FLUX_CODEX_API_BASE_URL` and must
   end in `/api/flux/codex`.
@@ -48,6 +46,24 @@ as a substitute for updating an existing one.
   `/updates/` endpoints through this integration.  Do not alter membership,
   delete resources, or use a project owned by another user.
 
+### Reading and verifying without flooding context
+
+- Read the full project (`GET {base}/projects/{id}/`) at most once per task,
+  before the first write, to find the persistent IDs of what will change.
+  Do not read it again after writes, and do not paste or summarize the full
+  response; keep only the IDs and objects the change touches.
+- Every PATCH/POST/DELETE response is the persisted state of the object it
+  wrote. Verify each write against that response (status code plus the
+  changed fields). That is the read-back; no further read is needed.
+- Send `?response=summary` when uploading or appending a plan, so the
+  response is a summary instead of the full project.
+- `POST .../relations/` returns the full project; check only the relations
+  that were sent, and do not read the project again afterwards.
+- A second full read is allowed only when a write response is missing,
+  ambiguous, or the write failed partway (to see what actually persisted).
+- Before reporting the change as complete, list the Flux objects that were
+  changed, with ID and the verified fields, in chat.
+
 ### API contracts
 
 `Resource` is the API surface for one Entity and stores only its path, title,
@@ -58,8 +74,8 @@ references an `ApiProjection`, which is a reusable project-level response
 schema (`name`, `description`, `schema`) rather than an endpoint.
 
 Read `api_operations`, `api_operation_responses`, and `api_projections` from
-`GET {base}/projects/{id}/`. Use persistent IDs and read the project back after
-each write. RolePermission references an ApiOperation and keeps its scope.
+`GET {base}/projects/{id}/`. Use persistent IDs and verify each write against
+its response. RolePermission references an ApiOperation and keeps its scope.
 
 ### Providers
 
@@ -75,8 +91,8 @@ For a private project, agents may manage providers through:
 
 Create payloads require `name` and `resource_ids`. Patch only the fields that
 change; omitted selections are preserved. All IDs must be persistent IDs from
-the project read response and belong to that project. Read the project back
-after every provider write.
+the project read response and belong to that project. Verify every provider
+write against its response.
 
 The upload payload follows Flux's domain model directly:
 

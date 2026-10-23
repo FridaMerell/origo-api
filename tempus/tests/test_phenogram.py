@@ -213,7 +213,8 @@ class GetPhenogramTests(TestCase):
         pg = phenogram.get_phenogram(self.species, None, today=TODAY)
         self.assertIsNone(pg.geo_area_id)
         self.assertEqual(Phenogram.objects.filter(geo_area__isnull=True).count(), 1)
-        # the whole-range significance is also mirrored onto the Species
+        # the whole-range value stays on the row: Species.significance is
+        # measured against the species' relatives by refresh_species_significance
+        self.assertIsNotNone(pg.significance)
         self.species.refresh_from_db()
-        self.assertEqual(self.species.significance, pg.significance)
-        self.assertIsNotNone(self.species.significance)
+        self.assertIsNone(self.species.significance)

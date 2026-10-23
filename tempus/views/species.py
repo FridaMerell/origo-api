@@ -26,6 +26,7 @@ from tempus.serializers import (
     GeneratePhenogramsSerializer,
     PhenogramQuerySerializer,
     PhenogramSerializer,
+    RegisterSpeciesBatchSerializer,
     RegisterSpeciesSerializer,
     SeasonalLandscapesQuerySerializer,
     SeasonalOverviewQuerySerializer,
@@ -438,6 +439,26 @@ class SpeciesViewSet(SharedDataViewSet):
             )
         return Response(
             self.get_serializer(species).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=False, methods=["post"], url_path="register-batch")
+    def register_batch(self, request):
+        """Queue hand-picked taxa for registration under one category.
+
+        Body: ``{"species_category": <id>, "dyntaxa_taxon_ids": [<int>, ...]}``.
+        Runs the same background import as a CSV checklist: every taxon is
+        fetched from Dyntaxa and Artfakta, then phenograms are scheduled.
+        """
+        payload = RegisterSpeciesBatchSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        category = payload.validated_data["species_category"]
+        taxon_ids = payload.validated_data["dyntaxa_taxon_ids"]
+
+        tasks.import_species_checklist.enqueue(str(category.pk), taxon_ids)
+
+        return Response(
+            {"category": str(category.pk), "queued": len(taxon_ids)},
+            status=status.HTTP_202_ACCEPTED,
         )
 
     @action(detail=False, methods=["post"], url_path="import-checklist")

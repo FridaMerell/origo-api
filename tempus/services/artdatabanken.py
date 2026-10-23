@@ -451,7 +451,9 @@ def search_taxa(
             "searchString": query,
             "searchFields": "Both",
             "culture": "sv_SE",
-            "isOkForObservationSystems": "True",
+            # An enum, not a boolean: "True"/"true" are rejected with HTTP 400,
+            # "0" matches nothing, "1" is "yes".
+            "isOkForObservationSystems": "1",
             "page": 1,
             "pageSize": max(limit * 3, 60),
         },

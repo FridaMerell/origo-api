@@ -8,7 +8,11 @@ from accounts.tasks import purge_dead_web_push_subscriptions
 from apsis.tasks import next_newsletter_run, send_weekly_apsis_newsletter
 from caelus.tasks import next_alert_run, notify_upcoming_sky_events
 from flux.tasks import notify_flux_task_deadlines
-from tempus.tasks import notify_followed_species_season_start, purge_birdnet_detections
+from tempus.tasks import (
+    fill_species_significance,
+    notify_followed_species_season_start,
+    purge_birdnet_detections,
+)
 
 
 ACTIVE_STATUSES = ("READY", "RUNNING")
@@ -42,3 +46,4 @@ class Command(BaseCommand):
         self._ensure(notify_upcoming_sky_events, run_after=next_alert_run())
         self._ensure(purge_dead_web_push_subscriptions)
         self._ensure(purge_birdnet_detections)
+        self._ensure(fill_species_significance)
