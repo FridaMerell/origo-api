@@ -36,7 +36,7 @@ from tempus.models import (
     SpeciesCategory,
     SpeciesCategoryMembership,
 )
-from tempus.services import checklists, year_summary
+from tempus.services import checklists, profile, year_summary
 
 
 class ObservationFilter(FilterSet):
@@ -398,6 +398,11 @@ class ObservationViewSet(ObservationCategoryActions, viewsets.ModelViewSet):
         else:
             raise ValidationError({"year": "Ange ett årtal, till exempel 2026."})
         return Response(year_summary.year_summary(user=request.user, year=year))
+
+    @action(detail=False, methods=["get"], url_path="profile")
+    def profile(self, request):
+        """The signed-in user's Tempus over all time."""
+        return Response(profile.profile_summary(user=request.user))
 
     @action(detail=False, methods=["post"], url_path="sync-checklists")
     def sync_checklists(self, request):

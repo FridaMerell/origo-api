@@ -151,6 +151,7 @@ def _first_observation(observations) -> dict:
     return {
         "id": str(first.pk),
         "species_id": str(first.species_id),
+        "dyntaxa_taxon_id": first.species.dyntaxa_taxon_id,
         "swedish_name": first.species.swedish_name,
         "scientific_name": first.species.scientific_name,
         "observed_at": first.observed_at,
