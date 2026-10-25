@@ -225,6 +225,8 @@ def _call(
     request_timeout = float(
         _config().get("TIMEOUT", 30) if timeout is None else timeout
     )
+    import requests
+
     with _global_request_slot():
         started = time.monotonic()
         try:
@@ -236,6 +238,11 @@ def _call(
                 headers={"Ocp-Apim-Subscription-Key": key},
                 timeout=request_timeout,
             )
+        # A timeout or dropped connection is an API failure like any other, so
+        # callers that handle ArtdatabankenAPIError (and self-scheduling task
+        # chains) survive it instead of dying on a raw requests exception.
+        except requests.RequestException as exc:
+            raise ArtdatabankenAPIError(method, url, 0, f"{type(exc).__name__}: {exc}") from exc
         finally:
             elapsed = time.monotonic() - started
             slow_request_seconds = max(30.0, request_timeout * 5)

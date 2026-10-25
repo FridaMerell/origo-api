@@ -17,6 +17,7 @@ from verso.views import (
     ExpenseViewSet,
     HouseViewSet,
     IncomeViewSet,
+    ResidentialHeatingViewSet,
     VentureTaskViewSet,
     VentureViewSet,
     UpdateViewSet,
@@ -43,6 +44,7 @@ router.register('documents', DocumentViewSet, basename='document')
 router.register('people', PersonViewSet, basename='person')
 router.register('person-relations', PersonRelationViewSet, basename='personrelation')
 router.register('history-events', HistoryEventViewSet, basename='historyevent')
+router.register('residential-heating', ResidentialHeatingViewSet, basename='residentialheating')
 urlpatterns = [
     path('', include(router.urls)),
 ]

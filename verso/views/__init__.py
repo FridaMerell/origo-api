@@ -8,6 +8,7 @@ from .history import HistoryEventViewSet, PersonRelationViewSet, PersonViewSet
 from .homes import HouseViewSet
 from .incomes import IncomeViewSet
 from .photos import AlbumViewSet, PhotoViewSet, TagViewSet
+from .residential_heating import ResidentialHeatingViewSet
 from .updates import UpdateViewSet
 from .ventures import VentureTaskViewSet, VentureViewSet
 
@@ -28,6 +29,7 @@ __all__ = [
     "ExpenseViewSet",
     "HouseViewSet",
     "IncomeViewSet",
+    "ResidentialHeatingViewSet",
     "UpdateViewSet",
     "VentureTaskViewSet",
     "VentureViewSet",

@@ -8,7 +8,8 @@ from .history import HistoryEventSerializer, PersonRelationSerializer, PersonSer
 from .homes import HouseSerializer
 from .incomes import IncomeSerializer
 from .photos import AlbumSerializer, PhotoSerializer, TagSerializer
+from .residential_heating import ResidentialHeatingSerializer
 from .updates import VersoUpdateSerializer
 from .ventures import VentureSerializer, VentureTaskSerializer
 
-__all__ = ["DocumentSerializer","HistoryEventSerializer", "PersonRelationSerializer", "PersonSerializer", "AlbumSerializer", "PhotoSerializer", "TagSerializer", "BookingRequestSerializer", "BookingSerializer", "CheckOutSerializer", "DrawingPageSerializer", "DrawingSerializer", "ExpenseSerializer", "HouseSerializer", "IncomeSerializer", "VentureSerializer", "VentureTaskSerializer", "VersoUpdateSerializer"]
+__all__ = ["DocumentSerializer","HistoryEventSerializer", "PersonRelationSerializer", "PersonSerializer", "AlbumSerializer", "PhotoSerializer", "TagSerializer", "BookingRequestSerializer", "BookingSerializer", "CheckOutSerializer", "DrawingPageSerializer", "DrawingSerializer", "ExpenseSerializer", "HouseSerializer", "IncomeSerializer", "ResidentialHeatingSerializer", "VentureSerializer", "VentureTaskSerializer", "VersoUpdateSerializer"]

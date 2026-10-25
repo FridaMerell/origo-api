@@ -8,6 +8,7 @@ from .history import HistoryEvent, Person, PersonRelation
 from .homes import House
 from .incomes import Income
 from .photos import Album, Photo, Tag
+from .residential_heating import ResidentialHeating
 from .ventures import Venture, VentureTask, VersoUpdate
 
-__all__ = ["Album", "Booking", "BookingRequest", "CheckOut", "Document", "Drawing", "DrawingPage", "Expense", "HistoryEvent", "House", "Income", "Person", "PersonRelation", "Photo", "Tag", "Venture", "VentureTask", "VersoUpdate"]
+__all__ = ["Album", "Booking", "BookingRequest", "CheckOut", "Document", "Drawing", "DrawingPage", "Expense", "HistoryEvent", "House", "Income", "Person", "PersonRelation", "Photo", "ResidentialHeating", "Tag", "Venture", "VentureTask", "VersoUpdate"]

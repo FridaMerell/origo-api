@@ -574,8 +574,20 @@ def fill_species_significance():
     within ``SPECIES_SIGNIFICANCE_RETRY``), observed ones first, and
     re-enqueues itself ``SPECIES_SIGNIFICANCE_INTERVAL`` later, or
     ``SPECIES_SIGNIFICANCE_IDLE`` later when nothing was left. A missing
-    Artdatabanken configuration ends the run early but keeps the chain going.
+    Artdatabanken configuration ends the run early but keeps the chain going,
+    and so does any error: the next run is queued in ``finally``.
     """
+    batch = []
+    try:
+        return _fill_species_significance_batch(batch)
+    finally:
+        delay = SPECIES_SIGNIFICANCE_INTERVAL if batch else SPECIES_SIGNIFICANCE_IDLE
+        fill_species_significance.using(run_after=timezone.now() + delay).enqueue()
+
+
+def _fill_species_significance_batch(batch: list) -> dict:
+    """One run of :func:`fill_species_significance`; ``batch`` is filled with
+    the species picked, so the caller can choose the next run's delay."""
     from django.core.cache import cache
     from django.db.models import Exists, OuterRef
 
@@ -587,7 +599,6 @@ def fill_species_significance():
         .order_by("-observed", "pk")
         .only("pk", "dyntaxa_taxon_id", "parent_dyntaxa_taxon_id", "swedish_name")
     )
-    batch = []
     chunk = []
 
     def take(rows):
@@ -603,7 +614,7 @@ def fill_species_significance():
                 break
     if chunk and len(batch) < SPECIES_SIGNIFICANCE_BATCH:
         take(chunk)
-    batch = batch[:SPECIES_SIGNIFICANCE_BATCH]
+    del batch[SPECIES_SIGNIFICANCE_BATCH:]
 
     filled = failed = unmeasured = 0
     for species in batch:
@@ -617,6 +628,13 @@ def fill_species_significance():
             logger.warning("fill_species_significance(%s) failed: %s", species.pk, exc)
             cache.set(_significance_mark(species.pk), True, int(SPECIES_SIGNIFICANCE_RETRY.total_seconds()))
             continue
+        # Any other error is one species' problem too: it is logged with its
+        # traceback and retried later, and the rest of the batch goes on.
+        except Exception:
+            failed += 1
+            logger.exception("fill_species_significance(%s) failed", species.pk)
+            cache.set(_significance_mark(species.pk), True, int(SPECIES_SIGNIFICANCE_RETRY.total_seconds()))
+            continue
         if value is None:
             unmeasured += 1
             cache.set(_significance_mark(species.pk), True, int(SPECIES_SIGNIFICANCE_RETRY.total_seconds()))
@@ -628,8 +646,6 @@ def fill_species_significance():
         "fill_species_significance: measured %d, too thin %d, failed %d",
         filled, unmeasured, failed,
     )
-    delay = SPECIES_SIGNIFICANCE_INTERVAL if batch else SPECIES_SIGNIFICANCE_IDLE
-    fill_species_significance.using(run_after=timezone.now() + delay).enqueue()
     return {"measured": filled, "too_thin": unmeasured, "failed": failed}
 
 
