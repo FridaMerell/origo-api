@@ -545,8 +545,9 @@ def fetch_locale_land_cover(locale_pk, *, buffer_metres=LOCALE_LAND_COVER_BUFFER
 
 # A species takes about 25 grid calls (one per month plus the group choice),
 # which the Artdatabanken client sends one at a time with a pause between:
-# some 35 seconds each, so a batch holds the worker for about twelve minutes.
-SPECIES_SIGNIFICANCE_BATCH = 20
+# some 50 seconds each, so a batch holds the worker for about four minutes.
+# Kept short so a deploy that kills the worker mid-run loses little.
+SPECIES_SIGNIFICANCE_BATCH = 5
 # The next run is queued when this one ends, so runs never overlap however
 # long a batch takes.
 SPECIES_SIGNIFICANCE_INTERVAL = timedelta(minutes=1)
