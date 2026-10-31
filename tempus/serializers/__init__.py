@@ -39,6 +39,7 @@ from .species import (
     SpeciesResolveRequestSerializer,
     SpeciesResyncSerializer,
     SpeciesSearchSerializer,
+    SpeciesSeasonLookupRequestSerializer,
     SpeciesSerializer,
 )
 
@@ -75,6 +76,7 @@ __all__ = [
     "SpeciesResolveRequestSerializer",
     "SpeciesResyncSerializer",
     "SpeciesSearchSerializer",
+    "SpeciesSeasonLookupRequestSerializer",
     "SpeciesSerializer",
     "SuggestedStopsQuerySerializer",
 ]

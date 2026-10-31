@@ -150,6 +150,27 @@ class SpeciesResolveRequestSerializer(serializers.Serializer):
         return value
 
 
+class SpeciesSeasonLookupRequestSerializer(serializers.Serializer):
+    """A pasted or imported species list and the seasonal view asked of it."""
+
+    ALL = "all"
+    IN_SEASON = "in_season"
+    OUT_OF_SEASON = "out_of_season"
+
+    values = serializers.ListField(
+        child=serializers.CharField(max_length=255),
+        allow_empty=False,
+        max_length=2000,
+    )
+    # Omitted or null means the whole country, as in the seasonal overview.
+    geo_area = serializers.PrimaryKeyRelatedField(
+        queryset=GeoArea.objects.all(), required=False, allow_null=True, default=None
+    )
+    season = serializers.ChoiceField(
+        choices=[ALL, IN_SEASON, OUT_OF_SEASON], required=False, default=ALL
+    )
+
+
 class RegisterSpeciesSerializer(serializers.Serializer):
     """Input for the "register a species from the API" action."""
 

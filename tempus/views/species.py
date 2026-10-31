@@ -38,6 +38,7 @@ from tempus.serializers import (
     SpeciesResolveRequestSerializer,
     SpeciesResyncSerializer,
     SpeciesSearchSerializer,
+    SpeciesSeasonLookupRequestSerializer,
     SpeciesSerializer,
 )
 from tempus.models import (
@@ -48,7 +49,7 @@ from tempus.models import (
     SpeciesFollow,
     species,
 )
-from tempus.services import artdatabanken, phenogram, season
+from tempus.services import artdatabanken, phenogram, season, species_lookup
 
 
 def _day_of_year_in_span(start_field, end_field, day):
@@ -360,6 +361,71 @@ class SpeciesViewSet(SharedDataViewSet):
             )
             row._is_low_confidence = row.record_count < opts["min_records"]
             row._seasonal_status = season.status_for(row)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="season-lookup",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def season_lookup(self, request):
+        """One page of an imported species list with its seasonal status.
+
+        Reads stored curves only. Besides the page, the response carries what
+        the list as a whole needs: the counts per season, every species id in
+        the chosen view (what a saved checklist will hold), and the species
+        and values that could not be shown.
+        """
+        params = SpeciesSeasonLookupRequestSerializer(data=request.data)
+        params.is_valid(raise_exception=True)
+        opts = params.validated_data
+        species_ids, unmatched = species_lookup.match_species(opts["values"])
+
+        # "Ur säsong" is everything not in season, including what is on its way in.
+        statuses = {
+            params.IN_SEASON: ["in_season"],
+            params.OUT_OF_SEASON: ["coming_into_season", "out_of_season"],
+        }
+        statuses[params.ALL] = statuses[params.IN_SEASON] + statuses[params.OUT_OF_SEASON]
+        overview_opts = {"geo_area": opts["geo_area"], "min_records": 20}
+
+        def curves(season_name):
+            queryset, _ = self._seasonal_overview_queryset(
+                request, {**overview_opts, "status": statuses[season_name]}
+            )
+            return queryset.filter(species_id__in=species_ids)
+
+        with_curve = curves(params.ALL)
+        selected = curves(opts["season"])
+        without_curve = Species.objects.filter(pk__in=species_ids).exclude(
+            pk__in=with_curve.order_by().values("species_id")
+        )
+
+        page = self.paginate_queryset(selected)
+        self._prepare_overview_rows(page, overview_opts)
+        response = self.get_paginated_response(
+            SeasonalOverviewSerializer(page, many=True).data
+        )
+        curve_count = with_curve.count()
+        in_season_count = curves(params.IN_SEASON).count()
+        response.data.update(
+            {
+                "in_season_count": in_season_count,
+                "out_of_season_count": curve_count - in_season_count,
+                "species_ids": (
+                    species_ids
+                    if opts["season"] == params.ALL
+                    else list(selected.values_list("species_id", flat=True))
+                ),
+                "without_phenogram": list(
+                    without_curve.order_by("swedish_name", "scientific_name").values(
+                        "id", "swedish_name", "scientific_name"
+                    )
+                ),
+                "unmatched": unmatched,
+            }
+        )
+        return response
 
     @action(
         detail=False,
