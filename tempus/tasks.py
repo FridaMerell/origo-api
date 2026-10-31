@@ -329,6 +329,7 @@ def notify_followed_species_season_start():
         Phenogram.objects.filter(
             species_id__in=species_ids,
             geo_area__isnull=True,
+            record_count__gt=0,
         )
         .order_by("species_id", "-years")
     )

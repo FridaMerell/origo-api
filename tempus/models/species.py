@@ -44,8 +44,8 @@ class Species(models.Model):
         return self.swedish_name or self.scientific_name
 
     def phenogram_for(self, geo_area=None):
-        """Return the newest stored activity curve for an area, if present."""
-        return self.phenograms.filter(geo_area=geo_area).order_by("-years").first()
+        """Return the newest stored activity curve with data for an area, if present."""
+        return self.phenograms.filter(geo_area=geo_area, record_count__gt=0).order_by("-years").first()
 
     def seasonal_status(self, *, geo_area=None, today=None):
         from tempus.services import season

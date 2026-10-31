@@ -157,10 +157,11 @@ class SpeciesSeasonLookupRequestSerializer(serializers.Serializer):
     IN_SEASON = "in_season"
     OUT_OF_SEASON = "out_of_season"
 
+    # Room for 5000 species when a CSV names each in several columns.
     values = serializers.ListField(
         child=serializers.CharField(max_length=255),
         allow_empty=False,
-        max_length=2000,
+        max_length=25000,
     )
     # Omitted or null means the whole country, as in the seasonal overview.
     geo_area = serializers.PrimaryKeyRelatedField(
@@ -168,6 +169,9 @@ class SpeciesSeasonLookupRequestSerializer(serializers.Serializer):
     )
     season = serializers.ChoiceField(
         choices=[ALL, IN_SEASON, OUT_OF_SEASON], required=False, default=ALL
+    )
+    search = serializers.CharField(
+        required=False, allow_blank=True, max_length=255, default=""
     )
 
 

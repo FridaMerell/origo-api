@@ -238,7 +238,9 @@ class SpeciesViewSet(SharedDataViewSet):
             else SpeciesFollow.objects.none()
         )
         queryset = (
-            Phenogram.objects.filter(years=phenogram.DEFAULT_YEARS)
+            # A curve built from no records has no season: its stored window
+            # is only a placeholder (see Phenogram.record_count).
+            Phenogram.objects.filter(years=phenogram.DEFAULT_YEARS, record_count__gt=0)
             .select_related("species")
             # The overview only needs the condensed seasonal envelope. Avoid
             # fetching every 52-week curve and provenance payload while
@@ -307,6 +309,7 @@ class SpeciesViewSet(SharedDataViewSet):
                 species_id=OuterRef("species_id"),
                 geo_area=geo_area,
                 years=phenogram.DEFAULT_YEARS,
+                record_count__gt=0,
             )
             queryset = queryset.annotate(
                 has_local_curve=Exists(local_curve_exists),
@@ -380,6 +383,13 @@ class SpeciesViewSet(SharedDataViewSet):
         params.is_valid(raise_exception=True)
         opts = params.validated_data
         species_ids, unmatched = species_lookup.match_species(opts["values"])
+        # The search narrows the whole list: rows, counts and what gets saved.
+        if opts["search"]:
+            species_ids = list(
+                Species.objects.filter(pk__in=species_ids)
+                .filter(species_lookup.search_condition(opts["search"]))
+                .values_list("pk", flat=True)
+            )
 
         # "Ur säsong" is everything not in season, including what is on its way in.
         statuses = {
@@ -419,7 +429,7 @@ class SpeciesViewSet(SharedDataViewSet):
                 ),
                 "without_phenogram": list(
                     without_curve.order_by("swedish_name", "scientific_name").values(
-                        "id", "swedish_name", "scientific_name"
+                        "swedish_name", "scientific_name"
                     )
                 ),
                 "unmatched": unmatched,
@@ -747,7 +757,7 @@ class PhenogramViewSet(viewsets.ReadOnlyModelViewSet):
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = PhenogramSerializer
-    queryset = Phenogram.objects.select_related("species", "geo_area")
+    queryset = Phenogram.objects.filter(record_count__gt=0).select_related("species", "geo_area")
     filterset_fields = ["species", "geo_area", "years"]
 
     def get_queryset(self):

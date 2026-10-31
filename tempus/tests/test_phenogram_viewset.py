@@ -48,13 +48,13 @@ class PhenogramViewSetStatusFilterTests(APITestCase):
         self.in_season = Phenogram.objects.create(
             species=self.in_season_species, geo_area=self.geo_area,
             peak_week=1, window_start_week=1, window_end_week=52,
-            start_day_of_year=in_start, end_day_of_year=in_end,
+            start_day_of_year=in_start, end_day_of_year=in_end, record_count=1,
             date_from=now.date(), date_to=now.date(), computed_at=now,
         )
         self.out_of_season = Phenogram.objects.create(
             species=self.out_of_season_species, geo_area=self.geo_area,
             peak_week=1, window_start_week=1, window_end_week=52,
-            start_day_of_year=out_start, end_day_of_year=out_end,
+            start_day_of_year=out_start, end_day_of_year=out_end, record_count=1,
             date_from=now.date(), date_to=now.date(), computed_at=now,
         )
 

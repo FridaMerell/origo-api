@@ -33,6 +33,9 @@ class Phenogram(models.Model):
     significance_basis = models.JSONField(default=dict, blank=True)
     smooth_weeks = models.PositiveSmallIntegerField(default=1)
     declustered = models.BooleanField(default=True)
+    # 0 means the build found no records. The row stays so the species is not
+    # crawled again on every read, but its window fields are placeholders
+    # (they come out as week 52) and must not be read as a season.
     record_count = models.PositiveIntegerField(default=0)
     record_limit_hit = models.BooleanField(default=False)
     sample_count = models.PositiveIntegerField(default=0)

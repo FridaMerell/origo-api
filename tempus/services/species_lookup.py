@@ -26,6 +26,14 @@ def _name_key(field: str):
     )
 
 
+def search_condition(term: str) -> Q:
+    """Species whose name contains ``term`` or whose taxon id is exactly it."""
+    condition = Q(swedish_name__icontains=term) | Q(scientific_name__icontains=term)
+    if term.isdecimal() and len(term) <= _MAX_TAXON_ID_DIGITS:
+        condition |= Q(dyntaxa_taxon_id=int(term))
+    return condition
+
+
 def match_species(values) -> tuple[list, list[str]]:
     """Return ``(species ids, the values no species answered to)``."""
     by_key = {_value_key(value): value.strip() for value in values if value.strip()}
