@@ -131,11 +131,12 @@ building happens in the `tempus.tasks.generate_phenogram` background task
 (django-tasks — run `python manage.py db_worker`). Phenograms are generated for
 **every `GeoArea`**, fanned out one build task per area:
 
-- when a `Species` is registered (`post_save` → `fan_out_species_phenograms`);
+- when a `Species` is registered (`post_save` → `fan_out_species_phenograms`,
+  which also queues the whole-range curve, as do the two triggers below that use it);
 - when a `GeoArea` is created (`post_save` → `fan_out_area_phenograms`, across
   all species);
-- on demand via `POST species/generate-phenograms/` (staff; `taxa` to limit,
-  `refresh` default true);
+- on demand via `POST species/generate-phenograms/` (staff; `taxa` or
+  `species_category` to limit, `refresh` default true);
 - from cron / shell via `python manage.py resync_phenograms` (stale or missing
   curves by default; `--older-than DAYS`, `--all`, `--taxon`, `--no-refresh`,
   `--dry-run`);

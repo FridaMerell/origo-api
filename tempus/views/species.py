@@ -394,6 +394,7 @@ class SpeciesViewSet(SharedDataViewSet):
         # "Ur säsong" is everything not in season, including what is on its way in.
         statuses = {
             params.IN_SEASON: ["in_season"],
+            params.AT_PEAK: ["at_peak"],
             params.OUT_OF_SEASON: ["coming_into_season", "out_of_season"],
         }
         statuses[params.ALL] = statuses[params.IN_SEASON] + statuses[params.OUT_OF_SEASON]
@@ -421,6 +422,7 @@ class SpeciesViewSet(SharedDataViewSet):
         response.data.update(
             {
                 "in_season_count": in_season_count,
+                "at_peak_count": curves(params.AT_PEAK).count(),
                 "out_of_season_count": curve_count - in_season_count,
                 "species_ids": (
                     species_ids
@@ -717,12 +719,12 @@ class SpeciesViewSet(SharedDataViewSet):
 
     @action(detail=False, methods=["post"], url_path="generate-phenograms")
     def generate_phenograms(self, request):
-        """Enqueue phenogram generation for every GeoArea, per species. Staff only.
+        """Enqueue phenogram generation for the whole range + every GeoArea, per species. Staff only.
 
-        Body (all optional): ``taxa`` (list of dyntaxa ids), ``all`` (``true`` =
-        every species), or neither for every species. ``refresh`` (default
+        Body (all optional): ``taxa`` (list of dyntaxa ids), ``species_category``
+        (one category's species), or neither for every species. ``refresh`` (default
         ``true``) rebuilds existing curves too. One fan-out task per species is
-        queued; each then queues one build per GeoArea. Returns ``202``.
+        queued; each then queues the whole-range build and one per GeoArea. Returns ``202``.
         """
         params = GeneratePhenogramsSerializer(data=request.data)
         params.is_valid(raise_exception=True)
@@ -731,6 +733,8 @@ class SpeciesViewSet(SharedDataViewSet):
 
         if opts.get("taxa"):
             selected = Species.objects.filter(dyntaxa_taxon_id__in=opts["taxa"])
+        elif opts.get("species_category"):
+            selected = opts["species_category"].species.all()
         else:
             selected = Species.objects.all()
 

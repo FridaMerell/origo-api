@@ -249,13 +249,13 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
 
 @task()
 def fan_out_species_phenograms(species_pk, *, refresh=True):
-    """Enqueue :func:`generate_phenogram` for this species across every GeoArea."""
+    """Enqueue :func:`generate_phenogram` for this species: whole range + every GeoArea."""
     from tempus.models import GeoArea, Species
 
     species = Species.objects.filter(pk=species_pk).first()
     if species is None or not _has_swedish_name(species):
         return
-    area_pks = [str(pk) for pk in GeoArea.objects.values_list("pk", flat=True)]
+    area_pks = [None, *(str(pk) for pk in GeoArea.objects.values_list("pk", flat=True))]
     queued = 0
     for area_pk in area_pks:
         _, created = enqueue_phenogram_generation(

@@ -155,6 +155,7 @@ class SpeciesSeasonLookupRequestSerializer(serializers.Serializer):
 
     ALL = "all"
     IN_SEASON = "in_season"
+    AT_PEAK = "at_peak"
     OUT_OF_SEASON = "out_of_season"
 
     # Room for 5000 species when a CSV names each in several columns.
@@ -168,7 +169,7 @@ class SpeciesSeasonLookupRequestSerializer(serializers.Serializer):
         queryset=GeoArea.objects.all(), required=False, allow_null=True, default=None
     )
     season = serializers.ChoiceField(
-        choices=[ALL, IN_SEASON, OUT_OF_SEASON], required=False, default=ALL
+        choices=[ALL, IN_SEASON, AT_PEAK, OUT_OF_SEASON], required=False, default=ALL
     )
     search = serializers.CharField(
         required=False, allow_blank=True, max_length=255, default=""
@@ -349,12 +350,16 @@ class SpeciesResyncSerializer(serializers.Serializer):
 class GeneratePhenogramsSerializer(serializers.Serializer):
     """Body for the bulk ``species/generate-phenograms/`` action.
 
-    ``taxa`` limits to explicit dyntaxa ids; omit for every species. ``refresh``
-    (default true) rebuilds existing curves too.
+    ``taxa`` limits to explicit dyntaxa ids and ``species_category`` to one
+    category's species; omit both for every species. ``refresh`` (default true)
+    rebuilds existing curves too.
     """
 
     taxa = serializers.ListField(
         child=serializers.IntegerField(min_value=1), required=False, allow_empty=False
+    )
+    species_category = serializers.PrimaryKeyRelatedField(
+        queryset=SpeciesCategory.objects.all(), required=False
     )
     refresh = serializers.BooleanField(required=False, default=True)
 

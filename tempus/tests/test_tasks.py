@@ -80,7 +80,7 @@ class GeneratePhenogramTaskTests(TestCase):
         with _patch(tasks.phenogram, "get_phenogram", boom):
             tasks.generate_phenogram.enqueue(self.species.pk, self.area.pk)  # no raise
 
-    def test_fan_out_species_enqueues_one_per_area(self):
+    def test_fan_out_species_enqueues_whole_range_and_one_per_area(self):
         GeoArea.objects.create(
             name="Skåne", kind=GeoArea.Kind.PROVINCE, country_code="SE", geometry=SWEDEN
         )
@@ -88,9 +88,9 @@ class GeneratePhenogramTaskTests(TestCase):
         with _patch(tasks.generate_phenogram, "enqueue",
                     lambda *a, **k: enqueued.append((a, k))):
             tasks.fan_out_species_phenograms.enqueue(self.species.pk)
-        self.assertEqual(len(enqueued), 2)
+        self.assertEqual(len(enqueued), 3)
         self.assertEqual({args[1] for args, _ in enqueued},
-                         {str(pk) for pk in GeoArea.objects.values_list("pk", flat=True)})
+                         {None, *(str(pk) for pk in GeoArea.objects.values_list("pk", flat=True))})
 
     def test_fan_out_area_enqueues_only_species_with_swedish_names(self):
         Species.objects.create(dyntaxa_taxon_id=222, scientific_name="Pieris napi")
