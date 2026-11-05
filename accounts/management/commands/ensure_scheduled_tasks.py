@@ -10,6 +10,8 @@ from caelus.tasks import next_alert_run, notify_upcoming_sky_events
 from flux.tasks import notify_flux_task_deadlines
 from tempus.tasks import (
     fill_species_significance,
+    next_first_observation_run,
+    notify_first_observation_of_year,
     notify_followed_species_season_start,
     purge_birdnet_detections,
 )
@@ -39,6 +41,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self._ensure(notify_flux_task_deadlines)
         self._ensure(notify_followed_species_season_start)
+        self._ensure(
+            notify_first_observation_of_year,
+            run_after=next_first_observation_run(),
+        )
         self._ensure(
             send_weekly_apsis_newsletter,
             run_after=next_newsletter_run(),

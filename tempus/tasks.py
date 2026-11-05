@@ -19,6 +19,7 @@ import calendar
 import datetime
 from functools import partial
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from accounts.models import Notification
 from django.db import transaction
@@ -400,6 +401,147 @@ def notify_followed_species_season_start():
         run_after=timezone.now() + timedelta(days=7)
     ).enqueue()
     return {"created": created}
+
+
+# Artportalen dates are Swedish; the daily first-observation check runs at this
+# hour and looks at the day before.
+FIRST_OBSERVATION_TIME_ZONE = ZoneInfo("Europe/Stockholm")
+FIRST_OBSERVATION_HOUR = 6
+_FIRST_OBSERVATION_FIELDS = [
+    "taxon.id", "event.plainStartDate", "location.locality", "location.municipality",
+]
+
+
+def next_first_observation_run(now=None):
+    """Return the next ``FIRST_OBSERVATION_HOUR`` o'clock in Swedish time."""
+    local_now = (now or timezone.now()).astimezone(FIRST_OBSERVATION_TIME_ZONE)
+    next_run = local_now.replace(
+        hour=FIRST_OBSERVATION_HOUR, minute=0, second=0, microsecond=0
+    )
+    if next_run <= local_now:
+        next_run += timedelta(days=1)
+    return next_run
+
+
+def _year_until_filter(day):
+    return {
+        "date": {
+            "startDate": datetime.date(day.year, 1, 1).isoformat(),
+            "endDate": day.isoformat(),
+            "dateFilterType": "BetweenStartDateAndEndDate",
+        },
+        "occurrenceStatus": "Present",
+    }
+
+
+def first_observed_on(taxon_ids, day):
+    """Return the taxon ids whose first Artportalen record of ``day``'s year is
+    dated ``day``. One SOS ``TaxonAggregation`` call covers every taxon."""
+    wanted = {int(taxon_id) for taxon_id in taxon_ids}
+    if not wanted:
+        return set()
+    agg = artdatabanken.taxon_aggregation(
+        {
+            **_year_until_filter(day),
+            "taxon": {"ids": sorted(wanted), "includeUnderlyingTaxa": True},
+        },
+        take=1000,
+    )
+    found = set()
+    for record in (agg or {}).get("records") or []:
+        taxon_id = record.get("taxonId")
+        # firstSighting carries the Swedish offset, so its date part is the
+        # date Artportalen shows.
+        first = str(record.get("firstSighting") or "")[:10]
+        if taxon_id is not None and int(taxon_id) in wanted and first == day.isoformat():
+            found.add(int(taxon_id))
+    return found
+
+
+def first_observation_details(taxon_id, day):
+    """Describe the year's first Artportalen record, e.g. "2026-04-01, Broby
+    (Uppsala)". One search for the earliest record."""
+    page = artdatabanken.search_observations(
+        {
+            **_year_until_filter(day),
+            "taxon": {"ids": [int(taxon_id)], "includeUnderlyingTaxa": True},
+            "output": {"fields": _FIRST_OBSERVATION_FIELDS},
+        },
+        take=1,
+        sort_by="event.startDate",
+        sort_order="Asc",
+    )
+    records = (page or {}).get("records") or []
+    if not records:
+        return day.isoformat()
+    record = records[0]
+    location = record.get("location") or {}
+    parts = [(record.get("event") or {}).get("plainStartDate") or day.isoformat()]
+    locality = (location.get("locality") or "").strip()
+    municipality = location.get("municipality") or ""
+    if isinstance(municipality, dict):
+        municipality = municipality.get("name") or ""
+    municipality = str(municipality).strip()
+    if locality and municipality:
+        parts.append(f"{locality} ({municipality})")
+    elif locality or municipality:
+        parts.append(locality or municipality)
+    return ", ".join(parts)
+
+
+@task()
+def notify_first_observation_of_year():
+    """Each morning, tell followers about species whose first Artportalen
+    record of the year is dated yesterday."""
+    yesterday = (
+        timezone.now().astimezone(FIRST_OBSERVATION_TIME_ZONE).date()
+        - timedelta(days=1)
+    )
+    try:
+        created = _notify_first_observations(yesterday)
+    finally:
+        notify_first_observation_of_year.using(
+            run_after=next_first_observation_run()
+        ).enqueue()
+    logger.info(
+        "notify_first_observation_of_year(%s): created %d notification(s)",
+        yesterday, created,
+    )
+    return {"created": created}
+
+
+def _notify_first_observations(day):
+    from accounts.tasks import send_notification_email
+    from tempus.models import SpeciesFollow
+
+    follows_by_taxon = {}
+    for follow in SpeciesFollow.objects.filter(
+        notifications_enabled=True,
+        species__dyntaxa_taxon_id__isnull=False,
+    ).select_related("species"):
+        follows_by_taxon.setdefault(follow.species.dyntaxa_taxon_id, []).append(follow)
+
+    created = 0
+    for taxon_id in first_observed_on(follows_by_taxon, day):
+        taxon_follows = follows_by_taxon[taxon_id]
+        species_name = str(taxon_follows[0].species)
+        message = (
+            f"Årets första obs av {species_name} i Artportalen: "
+            f"{first_observation_details(taxon_id, day)}."
+        )
+        for follow in taxon_follows:
+            notification = Notification.objects.create(
+                user_id=follow.user_id,
+                domain="tempus",
+                message=message,
+            )
+            send_notification_email.enqueue(
+                notification.pk,
+                "tempus_first_observation",
+                {"species_name": species_name},
+            )
+            created += 1
+    return created
 
 
 @task()

@@ -64,6 +64,10 @@ def _email_content(notification, template_key, context):
             else f"Säsongsstart om 7–14 dagar för {species_count} följda arter"
         )
         preheader = "En säsongsnotifikation från Tempus."
+    elif template_key == "tempus_first_observation":
+        subject = f"{context['species_name']} rapporterad i Artportalen"
+        preheader = notification.message.splitlines()[0]
+        template_key = "generic"
     elif template_key == "apsis_weekly":
         subject = "Här är veckans absid"
         preheader = notification.message.splitlines()[0]
