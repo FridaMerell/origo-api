@@ -11,7 +11,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from tempus import models
+from tempus import models, tasks
 from tempus.api.common import PublicReadThrottle, SharedDataViewSet
 from tempus.models import GeoArea, LandCoverFetch, Locale, Phenophase, Source
 from tempus.serializers import GeoAreaSerializer, PhenophaseSerializer, SourceSerializer
@@ -366,6 +366,7 @@ class LocaleViewSet(viewsets.ModelViewSet):
         fetch = LandCoverFetch.objects.filter(locale=locale).first()
         if fetch is None:
             return Response({"locale": locale.pk, "status": "missing"})
+        tasks.fail_if_hung(fetch)
 
         payload = {
             "locale": locale.pk,

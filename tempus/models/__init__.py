@@ -11,7 +11,13 @@ from .land_cover import LandCoverFetch
 from .phenology import Phenogram, PhenogramGeneration
 from .reference import Phenophase, Source
 from .routes import Route, RouteStop, RouteSuggestionRun
-from .species import Species, SpeciesCategory, SpeciesCategoryMembership, SpeciesFollow
+from .species import (
+    Species,
+    SpeciesCategory,
+    SpeciesCategoryMembership,
+    SpeciesFollow,
+    SpeciesNotificationLog,
+)
 
 __all__ = [
     "BIRDNET_DETECTION_CHANNEL",
@@ -34,4 +40,5 @@ __all__ = [
     "SpeciesCategory",
     "SpeciesCategoryMembership",
     "SpeciesFollow",
+    "SpeciesNotificationLog",
 ]

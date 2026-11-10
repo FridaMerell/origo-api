@@ -78,6 +78,7 @@ class RouteViewSet(viewsets.ModelViewSet):
                     },
                     status=status.HTTP_404_NOT_FOUND,
                 )
+            tasks.fail_if_hung(run)
             return Response(RouteSuggestionRunSerializer(run).data)
 
         # POST - start or reuse a run.

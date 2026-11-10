@@ -159,3 +159,30 @@ class SpeciesFollow(models.Model):
 
     def __str__(self):
         return f"{self.user} follows {self.species}"
+
+
+class SpeciesNotificationLog(models.Model):
+    """One sent species notice per user, kind, and period - the duplicate guard."""
+
+    class Kind(models.TextChoices):
+        SEASON_START = "season_start", "Season start"
+        FIRST_OBSERVATION = "first_observation", "First observation of the year"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="species_notification_logs")
+    species = models.ForeignKey(Species, on_delete=models.CASCADE, related_name="notification_logs")
+    kind = models.CharField(max_length=30, choices=Kind.choices)
+    # The season's computed start date, or 1 January of the year for a first observation.
+    period = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "species", "kind", "period"),
+                name="tempus_unique_species_notification_log",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user}: {self.get_kind_display()} for {self.species} ({self.period})"

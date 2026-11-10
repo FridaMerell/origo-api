@@ -33,6 +33,31 @@ logger = logging.getLogger(__name__)
 
 LOCALE_LAND_COVER_BUFFER_METRES = 5000
 
+# A pending/running row untouched for longer than this belongs to a worker that
+# died; it no longer blocks a new run. The phenogram crawl can be slow.
+GENERATION_STALE_AFTER = timedelta(hours=2)
+RUN_STALE_AFTER = timedelta(minutes=30)
+ACTIVE_RUN_STATUSES = ("pending", "running")
+
+
+def run_is_hung(run, stale_after) -> bool:
+    """Whether a pending/running row has not been updated within ``stale_after``."""
+    return (
+        run.status in ACTIVE_RUN_STATUSES
+        and run.updated_at < timezone.now() - stale_after
+    )
+
+
+def fail_if_hung(run, stale_after=RUN_STALE_AFTER) -> bool:
+    """Mark a hung ``RouteSuggestionRun``/``LandCoverFetch`` failed so pollers stop."""
+    if not run_is_hung(run, stale_after):
+        return False
+    run.status = "failed"
+    run.error = "Bakgrundskörningen avbröts innan den blev klar."
+    run.finished_at = timezone.now()
+    run.save(update_fields=["status", "error", "finished_at", "updated_at"])
+    return True
+
 
 def _has_swedish_name(species) -> bool:
     """Whether a species has a usable Swedish vernacular name."""
@@ -74,10 +99,11 @@ def enqueue_phenogram_generation(species_pk, geo_area_pk=None, *, years=None, re
                     **lookup
                 )
 
-        if not created and generation.status in {
-            PhenogramGeneration.Status.PENDING,
-            PhenogramGeneration.Status.RUNNING,
-        }:
+        if (
+            not created
+            and generation.status in ACTIVE_RUN_STATUSES
+            and not run_is_hung(generation, GENERATION_STALE_AFTER)
+        ):
             return generation, False
 
         generation.status = PhenogramGeneration.Status.PENDING
@@ -193,8 +219,9 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
     """
     from tempus.models import GeoArea, PhenogramGeneration, Species
 
+    # A deleted species or area also deletes its generation row (CASCADE).
     species = Species.objects.filter(pk=species_pk).first()
-    if species is None or not _has_swedish_name(species):
+    if species is None:
         return
     geo_area = (
         GeoArea.objects.filter(pk=geo_area_pk).first()
@@ -208,12 +235,22 @@ def generate_phenogram(species_pk, geo_area_pk=None, *, years=None, refresh=True
     generation = PhenogramGeneration.objects.filter(
         species=species, geo_area=geo_area,
     ).first()
+    if not _has_swedish_name(species):
+        # Otherwise the row would stay pending and block every later enqueue.
+        if generation is not None:
+            generation.status = PhenogramGeneration.Status.FAILED
+            generation.error = "The species has no Swedish name."
+            generation.save(update_fields=["status", "error", "updated_at"])
+        return
     if generation is not None:
         with transaction.atomic():
             generation = PhenogramGeneration.objects.select_for_update().get(
                 pk=generation.pk
             )
-            if generation.status == PhenogramGeneration.Status.RUNNING:
+            if (
+                generation.status == PhenogramGeneration.Status.RUNNING
+                and not run_is_hung(generation, GENERATION_STALE_AFTER)
+            ):
                 return
             generation.status = PhenogramGeneration.Status.RUNNING
             generation.error = ""
@@ -312,7 +349,7 @@ def _next_season_start_date(day_of_year, today):
 def notify_followed_species_season_start():
     """Notify followers on Sunday about species entering season in 7-14 days."""
     from accounts.tasks import send_notification_email
-    from tempus.models import Phenogram, SpeciesFollow
+    from tempus.models import Phenogram, SpeciesFollow, SpeciesNotificationLog
 
     today = timezone.localdate()
     if today.weekday() != 6:
@@ -348,39 +385,33 @@ def notify_followed_species_season_start():
         if not 7 <= days_until_start <= 14:
             continue
 
-        candidates_by_user.setdefault(follow.user, []).append(str(follow.species))
+        candidates_by_user.setdefault(follow.user, []).append(
+            (follow.species, season_start)
+        )
 
     created = 0
     prefix = "Snart i säsong – följda arter vars phenogram börjar inom 7–14 dagar:"
-    for user, species_names in candidates_by_user.items():
-        recent_messages = Notification.objects.filter(
-            user=user,
-            domain="tempus",
-            message__startswith=prefix,
-            created_at__date__range=(today - timedelta(days=14), today),
-        ).values_list("message", flat=True)
-        previously_notified = {
-            line[2:]
-            for previous_message in recent_messages
-            for line in previous_message.splitlines()
-            if line.startswith("- ")
-        }
-        species_names = [
-            name for name in species_names if name not in previously_notified
-        ]
-        if not species_names:
-            continue
+    for user, candidates in candidates_by_user.items():
+        # The log row is the record that this season was announced; it is
+        # rolled back with the notification if creating that fails.
+        with transaction.atomic():
+            species_names = []
+            for species, season_start in candidates:
+                _, is_new = SpeciesNotificationLog.objects.get_or_create(
+                    user=user,
+                    species=species,
+                    kind=SpeciesNotificationLog.Kind.SEASON_START,
+                    period=season_start,
+                )
+                if is_new:
+                    species_names.append(str(species))
+            if not species_names:
+                continue
 
-        message = prefix + "\n" + "\n".join(
-            f"- {species_name}" for species_name in sorted(species_names)
-        )
-        already_sent = Notification.objects.filter(
-            user=user,
-            domain="tempus",
-            message__startswith=prefix,
-            created_at__date=today,
-        ).exists()
-        if not already_sent:
+            species_names.sort()
+            message = prefix + "\n" + "\n".join(
+                f"- {species_name}" for species_name in species_names
+            )
             notification = Notification.objects.create(
                 user=user,
                 domain="tempus",
@@ -512,8 +543,9 @@ def notify_first_observation_of_year():
 
 def _notify_first_observations(day):
     from accounts.tasks import send_notification_email
-    from tempus.models import SpeciesFollow
+    from tempus.models import SpeciesFollow, SpeciesNotificationLog
 
+    year_start = datetime.date(day.year, 1, 1)
     follows_by_taxon = {}
     for follow in SpeciesFollow.objects.filter(
         notifications_enabled=True,
@@ -530,17 +562,28 @@ def _notify_first_observations(day):
             f"{first_observation_details(taxon_id, day)}."
         )
         for follow in taxon_follows:
-            notification = Notification.objects.create(
-                user_id=follow.user_id,
-                domain="tempus",
-                message=message,
-            )
-            send_notification_email.enqueue(
-                notification.pk,
-                "tempus_first_observation",
-                {"species_name": species_name},
-            )
-            created += 1
+            # A rerun of the same day (or a duplicate chain) finds the log row
+            # and sends nothing.
+            with transaction.atomic():
+                _, is_new = SpeciesNotificationLog.objects.get_or_create(
+                    user_id=follow.user_id,
+                    species_id=follow.species_id,
+                    kind=SpeciesNotificationLog.Kind.FIRST_OBSERVATION,
+                    period=year_start,
+                )
+                if not is_new:
+                    continue
+                notification = Notification.objects.create(
+                    user_id=follow.user_id,
+                    domain="tempus",
+                    message=message,
+                )
+                send_notification_email.enqueue(
+                    notification.pk,
+                    "tempus_first_observation",
+                    {"species_name": species_name},
+                )
+                created += 1
     return created
 
 
@@ -564,7 +607,7 @@ def compute_route_suggestions(route_pk):
     run.status = RouteSuggestionRun.RUNNING
     run.started_at = timezone.now()
     run.error = ""
-    run.save(update_fields=["status", "started_at", "error"])
+    run.save(update_fields=["status", "started_at", "error", "updated_at"])
 
     try:
         stops = route_planner.suggest_rest_stops(
@@ -578,20 +621,20 @@ def compute_route_suggestions(route_pk):
         run.status = RouteSuggestionRun.FAILED
         run.error = str(exc)
         run.finished_at = timezone.now()
-        run.save(update_fields=["status", "error", "finished_at"])
+        run.save(update_fields=["status", "error", "finished_at", "updated_at"])
         logger.warning("compute_route_suggestions(%s) failed: %s", route_pk, exc)
         return
     except Exception as exc:
         run.status = RouteSuggestionRun.FAILED
         run.error = f"{type(exc).__name__}: {exc}"
         run.finished_at = timezone.now()
-        run.save(update_fields=["status", "error", "finished_at"])
+        run.save(update_fields=["status", "error", "finished_at", "updated_at"])
         raise
 
     run.status = RouteSuggestionRun.SUCCEEDED
     run.result = stops
     run.finished_at = timezone.now()
-    run.save(update_fields=["status", "result", "finished_at"])
+    run.save(update_fields=["status", "result", "finished_at", "updated_at"])
     logger.info(
         "compute_route_suggestions(%s): %d stop(s)", route_pk, len(stops)
     )
@@ -644,7 +687,7 @@ def fetch_locale_land_cover(locale_pk, *, buffer_metres=LOCALE_LAND_COVER_BUFFER
     fetch.buffer_metres = buffer_metres
     fetch.started_at = timezone.now()
     fetch.error = ""
-    fetch.save(update_fields=["status", "buffer_metres", "started_at", "error"])
+    fetch.save(update_fields=["status", "buffer_metres", "started_at", "error", "updated_at"])
 
     needed_geometry = mapping(needed_shape)
     try:
@@ -658,14 +701,14 @@ def fetch_locale_land_cover(locale_pk, *, buffer_metres=LOCALE_LAND_COVER_BUFFER
         fetch.status = LandCoverFetch.FAILED
         fetch.error = str(exc)
         fetch.finished_at = timezone.now()
-        fetch.save(update_fields=["status", "error", "finished_at"])
+        fetch.save(update_fields=["status", "error", "finished_at", "updated_at"])
         logger.warning("fetch_locale_land_cover(%s) failed: %s", locale_pk, exc)
         return
     except Exception as exc:
         fetch.status = LandCoverFetch.FAILED
         fetch.error = f"{type(exc).__name__}: {exc}"
         fetch.finished_at = timezone.now()
-        fetch.save(update_fields=["status", "error", "finished_at"])
+        fetch.save(update_fields=["status", "error", "finished_at", "updated_at"])
         raise
 
     fetch.geometry = needed_geometry
@@ -674,7 +717,7 @@ def fetch_locale_land_cover(locale_pk, *, buffer_metres=LOCALE_LAND_COVER_BUFFER
         setattr(fetch, field, value)
     fetch.finished_at = timezone.now()
     fetch.save(
-        update_fields=["geometry", "status", "finished_at", *results.keys()]
+        update_fields=["geometry", "status", "finished_at", "updated_at", *results.keys()]
     )
     logger.info(
         "fetch_locale_land_cover(%s): %s",
