@@ -47,6 +47,15 @@ TAXON_SEARCH_MAX_LIMIT = 50
 # Dyntaxa taxon-category id for species rank (search returns species only).
 TAXON_CATEGORY_SPECIES = 17
 
+# A 429 ("Rate limit is exceeded. Try again in N seconds.") is sent again up
+# to this many times, after the Retry-After the response gives (or
+# RATE_LIMIT_WAIT seconds when it gives none). The wait holds the shared
+# request slot, so one asking for longer than RATE_LIMIT_MAX_WAIT is not
+# waited out: the 429 is raised, and the caller's own schedule decides.
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_WAIT = 2.0
+RATE_LIMIT_MAX_WAIT = 10.0
+
 # A resolved category subtree (all taxa under one node, with names) is cached
 # this long. The Dyntaxa tree barely moves, so this can be generous — it means
 # one API call per category, then in-memory text filtering for every search.
@@ -66,6 +75,13 @@ class ArtdatabankenAPIError(RuntimeError):
         self.status = status
         self.body = body
         super().__init__(f"{method} {url} -> HTTP {status}: {body[:500]}")
+
+    @property
+    def transient(self) -> bool:
+        """A failure of the moment, not of the request: rate limited (429), a
+        server error (5xx), or no answer at all (0: timeout, dropped
+        connection). The same request is worth sending again shortly."""
+        return self.status in (0, 429) or self.status >= 500
 
 
 class TaxonData(TypedDict):
@@ -210,6 +226,16 @@ def _global_request_slot():
             pass
 
 
+def _retry_after(response) -> float:
+    """Seconds a 429 response asks to wait, at least one. A Retry-After that
+    is not a number of seconds (an HTTP date) counts as RATE_LIMIT_WAIT."""
+    try:
+        wait = float(response.headers.get("Retry-After") or RATE_LIMIT_WAIT)
+    except ValueError:
+        wait = RATE_LIMIT_WAIT
+    return max(wait, 1.0)
+
+
 def _call(
     method: str,
     base_url_key: str,
@@ -227,32 +253,41 @@ def _call(
     )
     import requests
 
-    with _global_request_slot():
-        started = time.monotonic()
-        try:
-            response = _session().request(
-                method,
-                url,
-                params=params,
-                json=json,
-                headers={"Ocp-Apim-Subscription-Key": key},
-                timeout=request_timeout,
-            )
-        # A timeout or dropped connection is an API failure like any other, so
-        # callers that handle ArtdatabankenAPIError (and self-scheduling task
-        # chains) survive it instead of dying on a raw requests exception.
-        except requests.RequestException as exc:
-            raise ArtdatabankenAPIError(method, url, 0, f"{type(exc).__name__}: {exc}") from exc
-        finally:
-            elapsed = time.monotonic() - started
-            slow_request_seconds = max(30.0, request_timeout * 5)
-            if elapsed > slow_request_seconds:
-                logger.warning(
-                    "Slow Artdatabanken request: %s %s took %.1fs",
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        with _global_request_slot():
+            started = time.monotonic()
+            try:
+                response = _session().request(
                     method,
                     url,
-                    elapsed,
+                    params=params,
+                    json=json,
+                    headers={"Ocp-Apim-Subscription-Key": key},
+                    timeout=request_timeout,
                 )
+            # A timeout or dropped connection is an API failure like any other, so
+            # callers that handle ArtdatabankenAPIError (and self-scheduling task
+            # chains) survive it instead of dying on a raw requests exception.
+            except requests.RequestException as exc:
+                raise ArtdatabankenAPIError(method, url, 0, f"{type(exc).__name__}: {exc}") from exc
+            finally:
+                elapsed = time.monotonic() - started
+                slow_request_seconds = max(30.0, request_timeout * 5)
+                if elapsed > slow_request_seconds:
+                    logger.warning(
+                        "Slow Artdatabanken request: %s %s took %.1fs",
+                        method,
+                        url,
+                        elapsed,
+                    )
+            if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+                break
+            wait = _retry_after(response)
+            if wait > RATE_LIMIT_MAX_WAIT:
+                break
+            # Waiting while holding the slot holds back every Tempus process,
+            # which is what the rate limit asks for.
+            time.sleep(wait)
     if not response.ok:
         raise ArtdatabankenAPIError(method, url, response.status_code, response.text)
     if response.status_code == 204 or not response.content:
@@ -797,23 +832,28 @@ def search_observations(
     )
 
 
-def count_observations(search_filter: dict) -> int:
-    """POST /Observations/Count."""
+def count_observations(search_filter: dict, *, timeout: float | None = None) -> int:
+    """POST /Observations/Count. A count over a large taxon and several years
+    can be slow, so ``timeout`` is accepted like :func:`geo_grid_aggregation`."""
     result = _call(
         "POST", "SPECIES_OBSERVATION_URL", "SUBSCRIPTION_KEY_SOS",
-        "/Observations/Count", json=search_filter,
+        "/Observations/Count", json=search_filter, timeout=timeout,
     )
     if isinstance(result, dict):
         return int(result.get("count", result.get("totalCount", 0)))
     return int(result or 0)
 
 
-def taxon_aggregation(search_filter: dict, *, skip: int = 0, take: int = 100) -> dict:
-    """POST /Observations/TaxonAggregation - per-taxon observation counts."""
+def taxon_aggregation(
+    search_filter: dict, *, skip: int = 0, take: int = 100, timeout: float | None = None
+) -> dict:
+    """POST /Observations/TaxonAggregation - per-taxon observation counts. An
+    aggregation over a large taxon and several years can be slow, so
+    ``timeout`` is accepted like :func:`geo_grid_aggregation`."""
     return _call(
         "POST", "SPECIES_OBSERVATION_URL", "SUBSCRIPTION_KEY_SOS",
         "/Observations/TaxonAggregation", params={"skip": skip, "take": take},
-        json=search_filter,
+        json=search_filter, timeout=timeout,
     )
 
 

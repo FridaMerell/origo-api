@@ -13,19 +13,113 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.db.models import Count, Exists, F, Min, OuterRef, Subquery
 from django.db.models.functions import ExtractMonth, ExtractYear
 
-from tempus.models import Observation
+from tempus.models import GeoArea, Observation, Phenogram
 from tempus.services.diversity import RED_LIST_BUMP
-from tempus.services.geo import haversine_m
+from tempus.services.geo import haversine_m, point_in_multipolygon
 from tempus.services.route_planner import _redlist_code
 
 STOCKHOLM = ZoneInfo("Europe/Stockholm")
 PHOTO_LIMIT = 12
 
 
-def _rarity(row: dict) -> float:
-    """A species' rarity among its relatives with its red-list status added, as
-    the route planner weighs it (``diversity.RED_LIST_BUMP``)."""
-    return min(1.0, row["significance"] + RED_LIST_BUMP.get(row["red_list_category"], 0.0))
+def _bbox(geometry: dict) -> tuple[float, float, float, float] | None:
+    """``(min_lon, min_lat, max_lon, max_lat)`` of a Polygon or MultiPolygon."""
+    coords = (geometry or {}).get("coordinates") or []
+    polygons = [coords] if geometry.get("type") == "Polygon" else coords
+    points = [point for polygon in polygons for point in (polygon[0] if polygon else [])]
+    if not points:
+        return None
+    lons = [point[0] for point in points]
+    lats = [point[1] for point in points]
+    return min(lons), min(lats), max(lons), max(lats)
+
+
+def rarest(observations, species: list[dict]) -> dict | None:
+    """The species whose report stands out most where it was made.
+
+    An observation counts with its species' significance for the province
+    (landskap) it lies in (``Phenogram.significance``), or the whole-country
+    value (``Species.significance``) when that province has none or the
+    observation has no position; red-list status is added as the route planner
+    weighs it (``diversity.RED_LIST_BUMP``). ``species`` is one row per species
+    with ``id``, ``significance`` and ``red_list_category``; the winning row is
+    returned with ``significance`` set to the value it won with.
+
+    Candidates are tried highest value first, and each is checked only against
+    its own species' positions, so most positions are never placed in a
+    province.
+    """
+    by_id = {row["id"]: row for row in species}
+    area_values: dict[str, dict[str, float]] = {}
+    for species_id, area_id, value in (
+        Phenogram.objects.filter(
+            species_id__in=list(by_id),
+            geo_area__kind=GeoArea.Kind.PROVINCE,
+            significance__isnull=False,
+            # Values from before the species-group measure have no group.
+            significance_basis__has_key="group",
+        )
+        .order_by("computed_at")
+        .values_list("species_id", "geo_area_id", "significance")
+    ):
+        area_values.setdefault(str(species_id), {})[str(area_id)] = value
+
+    candidates = []
+    for species_id, row in by_id.items():
+        bump = RED_LIST_BUMP.get(row["red_list_category"], 0.0)
+        for area_id, value in area_values.get(species_id, {}).items():
+            candidates.append((min(1.0, value + bump), value, species_id, area_id))
+        if row["significance"] is not None:
+            candidates.append((min(1.0, row["significance"] + bump), row["significance"], species_id, None))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+
+    # Positions of the species with a province value; an observation of one
+    # without a usable position counts with the whole-country value.
+    positions: dict[str, list[tuple[float, float]]] = {}
+    unplaced = set()
+    for species_id, kind, coordinates in (
+        observations.filter(species_id__in=list(area_values))
+        .values_list("species_id", "location__type", "location__coordinates")
+        .distinct()
+    ):
+        try:
+            if kind != "Point":
+                raise ValueError
+            point = (float(coordinates[0]), float(coordinates[1]))
+        except (IndexError, TypeError, ValueError):
+            unplaced.add(str(species_id))
+            continue
+        positions.setdefault(str(species_id), []).append(point)
+    provinces = {
+        str(area.pk): (area.geometry, _bbox(area.geometry))
+        for area in GeoArea.objects.filter(kind=GeoArea.Kind.PROVINCE).only("pk", "geometry")
+    }
+
+    def inside(point, area_id) -> bool:
+        geometry, bbox = provinces.get(area_id, (None, None))
+        if bbox is None:
+            return False
+        lon, lat = point
+        return bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3] and point_in_multipolygon(point, geometry)
+
+    for _, value, species_id, area_id in candidates:
+        own = positions.get(species_id, [])
+        rated = area_values.get(species_id, {})
+        if area_id is not None:
+            found = any(inside(point, area_id) for point in own)
+        else:
+            # The whole-country value counts for an observation outside every
+            # province the species has a value for.
+            found = (
+                not rated
+                or species_id in unplaced
+                or any(not any(inside(point, rated_id) for rated_id in rated) for point in own)
+            )
+        if found:
+            return {**by_id[species_id], "significance": value}
+    return None
 
 
 def observed_years(*, user: AbstractBaseUser) -> list[int]:
@@ -72,15 +166,13 @@ def year_summary(*, user: AbstractBaseUser, year: int) -> dict:
         .order_by("-observation_count", "locale__name")
         .first()
     )
-    rated = [row for row in species if row["significance"] is not None]
-
     summary.update(
         months=months,
         first_observation=_first_observation(observations),
         species=species,
         new_species_count=sum(row["is_new"] for row in species),
         red_listed_count=sum(bool(row["red_list_category"]) for row in species),
-        rarest=max(rated, key=_rarity) if rated else None,
+        rarest=rarest(observations, species),
         photos=_photos(observations),
         points=[point["coordinates"] for point in points],
         extremes=_extremes(points),

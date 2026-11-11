@@ -3,9 +3,9 @@ import datetime
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from tempus.models import GeoArea, Phenogram, Species
+from tempus.models import GeoArea, Phenogram, Species, SpeciesCategory, SpeciesCategoryMembership
 from tempus.services import artdatabanken as adb
-from tempus.services import phenogram
+from tempus.services import diversity, phenogram
 
 _SETTINGS = {
     "SPECIES_OBSERVATION_URL": "https://api.test/sos/v1",
@@ -20,6 +20,8 @@ _SETTINGS = {
 
 TODAY = datetime.date(2026, 6, 15)
 TAXON = 101664
+GROUP = 3000188
+TOP_GROUP = 4000104
 
 SWEDEN = {
     "type": "MultiPolygon",
@@ -46,11 +48,11 @@ def _spring_records():
 
 
 class _FakeResponse:
-    def __init__(self, body):
-        self.status_code = 200
-        self.ok = True
+    def __init__(self, body, status=200, text="ok"):
+        self.status_code = status
+        self.ok = status < 400
         self._body = body
-        self.text = "ok"
+        self.text = text
         self.content = b"body"
 
     def json(self):
@@ -58,8 +60,10 @@ class _FakeResponse:
 
 
 class _Session:
-    def __init__(self, records):
+    def __init__(self, records, max_zoom=99, presence="Bofast och reproducerande", history="Spontan"):
         self._records = records
+        self._max_zoom = max_zoom
+        self._presence = {"swedishPresence": presence, "immigrationHistory": history}
         self.calls = []
 
     def request(self, method, url, params=None, json=None, headers=None, timeout=None):
@@ -72,17 +76,33 @@ class _Session:
                 "records": self._records[skip:skip + take],
             })
         if url.endswith("/Observations/GeoGridAggregation"):
-            # species-filtered footprint is smaller than all-taxa effort
-            n = 3 if (json or {}).get("taxon") else 40
+            if params["zoom"] > self._max_zoom:
+                return _FakeResponse({}, 400, "The number of cells that can be returned is too large.")
+            # the species: 3 cells a year; its group: 40 cells, the species' 3
+            # among them with 2 of the group's taxa each, the others with 10
+            if json["taxon"]["ids"] == [TAXON]:
+                cells = [(i, 5, 1) for i in range(3)]
+            else:
+                cells = [(i, 50, 2 if i < 3 else 10) for i in range(40)]
             return _FakeResponse({"gridCells": [
-                {"boundingBox": [17.0 + i * 0.1, 59.0, 17.1 + i * 0.1, 59.1],
-                 "observationsCount": 5}
-                for i in range(n)
+                {"x": 1000 + i, "y": 2000, "observationsCount": reports, "taxaCount": taxa}
+                for i, reports, taxa in cells
             ]})
+        if url.endswith("/speciesdata/taxonomy"):
+            return _FakeResponse([{"speciesData": self._presence, "taxonId": TAXON}])
+        if url.endswith("/Observations/Count"):
+            # the species' group is reported a tenth as much as the top group
+            return _FakeResponse({"count": 1_000 if json["taxon"]["ids"] == [GROUP] else 10_000})
         raise AssertionError(f"unexpected URL {url}")
 
     def search_calls(self):
         return [c for c in self.calls if c["url"].endswith("/Observations/Search")]
+
+    def grid_calls(self, taxon_id):
+        return [
+            c for c in self.calls
+            if c["url"].endswith("/Observations/GeoGridAggregation") and c["json"]["taxon"]["ids"] == [taxon_id]
+        ]
 
 
 class _patch:
@@ -172,6 +192,10 @@ class GetPhenogramTests(TestCase):
         self.area = GeoArea.objects.create(
             name="Sverige", kind=GeoArea.Kind.COUNTRY, country_code="SE", geometry=SWEDEN
         )
+        group = SpeciesCategory.objects.create(label="Fjärilar", taxon_id=GROUP, is_primary=True)
+        child = SpeciesCategory.objects.create(label="Vitfjärilar", parent_category=group)
+        SpeciesCategoryMembership.objects.create(category=child, species=self.species)
+        SpeciesCategory.objects.create(label="Fåglar", taxon_id=TOP_GROUP, is_primary=True)
 
     def _session(self):
         session = _Session(_spring_records())
@@ -186,10 +210,59 @@ class GetPhenogramTests(TestCase):
         self.assertEqual(len(pg.weeks), 52)
         self.assertEqual(Phenogram.objects.count(), 1)
         self.assertEqual(pg.geo_area, self.area)
-        # significance filled from the occupied-cell share (3 of 40 cells)
+        # measured against the primary group above the species' own category,
+        # over three whole years: 3 of 40 cells, weighted by the group's taxa
+        # per cell (2 in the species' cells, 10 in the others)
+        basis = pg.significance_basis
+        self.assertEqual(basis["group"], GROUP)
+        self.assertEqual(basis["years"], [2023, 2024, 2025])
+        self.assertEqual(basis["species_cells"], 9)
+        self.assertEqual(basis["group_cells"], 120)
+        self.assertEqual(basis["spread"], round(6 / 376, 6))
+        self.assertEqual(basis["rarity"], diversity.significance_from_spread(6 / 376, 120))
+        # a group reported a tenth as much as the top one
+        self.assertEqual(basis["relevance"], 0.75)
+        self.assertEqual(pg.significance, round(basis["rarity"] * basis["relevance"], 3))
+
+    def test_species_without_a_primary_group_has_no_significance(self):
+        session = self._session()
+        SpeciesCategoryMembership.objects.filter(species=self.species).delete()
+        pg = phenogram.get_phenogram(self.species, self.area, today=TODAY)
+        self.assertIsNone(pg.significance)
+        self.assertEqual(pg.significance_basis, {})
+        self.assertEqual(session.grid_calls(TAXON), [])
+
+    def test_casual_introduced_species_has_no_significance(self):
+        session = _Session(_spring_records(), presence="Tillfällig, ej reproducerande",
+                           history="Aktivt införd efter år 1800")
+        self.enterContext(_patch(adb, "_session", lambda: session))
+        pg = phenogram.get_phenogram(self.species, self.area, today=TODAY)
+        self.assertIsNone(pg.significance)
+        self.assertEqual(pg.significance_basis["immigration_history"], "Aktivt införd efter år 1800")
+        self.assertEqual(session.grid_calls(TAXON), [])
+
+    def test_vagrant_that_came_on_its_own_keeps_significance(self):
+        session = _Session(_spring_records(), presence="Tillfällig, ej reproducerande", history="Spontan")
+        self.enterContext(_patch(adb, "_session", lambda: session))
+        pg = phenogram.get_phenogram(self.species, self.area, today=TODAY)
         self.assertIsNotNone(pg.significance)
-        self.assertEqual(pg.significance_basis["species_cells"], 3)
-        self.assertEqual(pg.significance_basis["area_cells"], 40)
+
+    def test_group_counts_are_shared_between_builds(self):
+        session = self._session()
+        phenogram.get_phenogram(self.species, self.area, today=TODAY)
+        phenogram.get_phenogram(self.species, self.area, refresh=True, today=TODAY)
+        self.assertEqual(len(session.grid_calls(GROUP)), 3)
+        self.assertEqual(len(session.grid_calls(TAXON)), 6)
+
+    def test_area_too_large_for_the_finest_grid_uses_a_coarser_one(self):
+        session = _Session(_spring_records(), max_zoom=phenogram.SIGNIFICANCE_GRID_ZOOM - 1)
+        self.enterContext(_patch(adb, "_session", lambda: session))
+        pg = phenogram.get_phenogram(self.species, self.area, today=TODAY)
+        coarser = phenogram.SIGNIFICANCE_GRID_ZOOM - 1
+        self.assertEqual(pg.significance_basis["zoom"], [coarser] * 3)
+        self.assertEqual(pg.significance_basis["spread"], round(6 / 376, 6))
+        # the species is counted only at the zoom its group was
+        self.assertEqual([c["params"]["zoom"] for c in session.grid_calls(TAXON)], [coarser] * 3)
 
     def test_second_call_reads_the_row_without_crawling(self):
         session = self._session()
@@ -213,8 +286,13 @@ class GetPhenogramTests(TestCase):
         pg = phenogram.get_phenogram(self.species, None, today=TODAY)
         self.assertIsNone(pg.geo_area_id)
         self.assertEqual(Phenogram.objects.filter(geo_area__isnull=True).count(), 1)
-        # the whole-range value stays on the row: Species.significance is
-        # measured against the species' relatives by refresh_species_significance
+        # the whole-range value is the species' value for the whole country
         self.assertIsNotNone(pg.significance)
+        self.species.refresh_from_db()
+        self.assertEqual(self.species.significance, pg.significance)
+
+    def test_area_row_leaves_the_species_value(self):
+        self._session()
+        phenogram.get_phenogram(self.species, self.area, today=TODAY)
         self.species.refresh_from_db()
         self.assertIsNone(self.species.significance)

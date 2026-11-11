@@ -649,14 +649,13 @@ def _append_design_to_project(project, user, plan, entities):
 
     resources = {}
     for item in _items(plan, 'resources'):
+        _reject_resource_labels(item)
         entity = entity_for(item.get('entity_ref'), 'entity_ref')
         if Resource.objects.filter(entity=entity).exists():
             raise CodexPlanError(f'Entity {entity.name} already has a resource.')
         resources[entity.name] = Resource.objects.create(
             entity=entity,
             path=_text(item.get('path'), 'resource.path', required=True, maximum=100),
-            title=_text(item.get('title'), 'resource.title', maximum=100),
-            description=_text(item.get('description'), 'resource.description', maximum=10000),
         )
 
     for item in _items(plan, 'api_projections'):
@@ -966,10 +965,18 @@ def delete_entity_field_in_private_project(user, project_id, entity_id, field_id
     return {'id': field_id, 'entity_id': entity_id, 'deleted': True}
 
 
+def _reject_resource_labels(payload):
+    """Resource stores only its path; say so instead of dropping a title or description."""
+    given = [name for name in ('title', 'description') if name in payload]
+    if given:
+        raise CodexPlanError(f'Resource stores only path; {" and ".join(given)} cannot be saved.')
+
+
 def update_resource_in_private_project(user, project_id, entity_id, payload):
     """Partially update the API resource belonging to one private project entity."""
     if not isinstance(payload, dict):
         raise CodexPlanError('resource must be an object.')
+    _reject_resource_labels(payload)
     try:
         project = _private_projects_for(user).get(pk=project_id)
     except Project.DoesNotExist as exc:
@@ -981,26 +988,15 @@ def update_resource_in_private_project(user, project_id, entity_id, payload):
     try:
         resource = Resource.objects.get(entity=entity)
     except Resource.DoesNotExist:
-        if 'path' not in payload:
-            raise CodexPlanError('A new resource requires path.')
         resource = Resource(entity=entity)
 
-    update_fields = []
-    if 'path' in payload:
-        resource.path = _text(payload.get('path'), 'resource.path', required=True, maximum=100)
-        update_fields.append('path')
-    if 'title' in payload:
-        resource.title = _text(payload.get('title'), 'resource.title', maximum=100)
-        update_fields.append('title')
-    if 'description' in payload:
-        resource.description = _text(payload.get('description'), 'resource.description', maximum=10000)
-        update_fields.append('description')
-    if not update_fields:
-        raise CodexPlanError('Provide at least one of: path, title, description.')
+    if 'path' not in payload:
+        raise CodexPlanError('Provide path.')
+    resource.path = _text(payload.get('path'), 'resource.path', required=True, maximum=100)
     if resource.pk is None:
         resource.save()
     else:
-        resource.save(update_fields=update_fields)
+        resource.save(update_fields=['path'])
     return {
         'id': resource.id,
         'entity_id': entity.id,

@@ -24,7 +24,7 @@ from tempus.models import (
 )
 from tempus.services.geo import haversine_m
 from tempus.services.route_planner import _redlist_code
-from tempus.services.year_summary import STOCKHOLM, _first_observation, _rarity
+from tempus.services.year_summary import STOCKHOLM, _first_observation, rarest
 
 TOP_LOCALE_LIMIT = 5
 
@@ -55,13 +55,12 @@ def profile_summary(*, user: AbstractBaseUser) -> dict:
         return summary
 
     species = _species(observations)
-    rated = [row for row in species if row["significance"] is not None]
     summary.update(
         first_observation=_first_observation(observations),
         red_listed_count=sum(bool(row["red_list_category"]) for row in species),
         most_observed=max(species, key=lambda row: (row["observation_count"], row["first_observed_at"])),
         newest=max(species, key=lambda row: row["first_observed_at"]),
-        rarest=max(rated, key=_rarity) if rated else None,
+        rarest=rarest(observations, species),
         groups=_groups(observations),
         years=_years(observations, species),
         months=_months(observations),

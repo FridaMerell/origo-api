@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest import mock
 
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -16,12 +17,16 @@ _SETTINGS = {
     "TIMEOUT": 5,
     "USER_AGENT": "test",
 }
+# A SimpleTestCase may not touch the database, which the default
+# DatabaseCache would on cache.clear().
+_LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
 
 class FakeResponse:
-    def __init__(self, *, status=200, body=None):
+    def __init__(self, *, status=200, body=None, headers=None):
         self.status_code = status
         self.ok = 200 <= status < 300
+        self.headers = headers or {}
         self._body = body
         self.text = "" if body is None else str(body)
         self.content = b"" if body is None else b"body"
@@ -117,7 +122,7 @@ class NormalizeSpeciesDataTests(SimpleTestCase):
         self.assertIs(adb._normalize_landscapes, adb._normalize_speciesdata)
 
 
-@override_settings(ARTDATABANKEN=_SETTINGS)
+@override_settings(ARTDATABANKEN=_SETTINGS, CACHES=_LOCMEM)
 class SpeciesDatasetEndpointTests(SimpleTestCase):
     def setUp(self):
         cache.clear()
@@ -241,7 +246,7 @@ class BulkResyncHelperTests(TestCase):
         self.assertIsInstance(results[1][2], adb.ArtdatabankenAPIError)
 
 
-@override_settings(ARTDATABANKEN=_SETTINGS)
+@override_settings(ARTDATABANKEN=_SETTINGS, CACHES=_LOCMEM)
 class TransportTests(SimpleTestCase):
     def setUp(self):
         cache.clear()
@@ -310,30 +315,69 @@ class TransportTests(SimpleTestCase):
         results = adb.search_taxa("plebejus")
         self.assertEqual([r["dyntaxa_taxon_id"] for r in results], [1])
 
-    def test_search_taxa_filters_by_ancestor_when_scoped(self):
-        session = _use(
-            self,
-            FakeResponse(body={"data": [
-                {"taxonId": 100034, "names": [
-                    {"name": "Circus cyaneus", "category": {"value": "ScientificName"},
-                     "isRecommended": True}]},
-                {"taxonId": 999, "names": [
-                    {"name": "Aurora aurora", "category": {"value": "ScientificName"},
-                     "isRecommended": True}]},
-            ]}),
-            FakeResponse(body={"taxonIds": [0, 4000104, 6000000]}),   # 100034 parents
-            FakeResponse(body={"taxonIds": [0, 12345]}),              # 999 parents
-        )
-        results = adb.search_taxa("aurora", under_taxon_id=4000104)
+    def test_search_taxa_searches_the_category_subtree_when_scoped(self):
+        session = _use(self, FakeResponse(body={
+            "id": 4000104, "scientificName": "Aves", "swedishName": "fåglar", "taxonCategoryId": 5,
+            "children": [
+                {"id": 1001, "scientificName": "Circus", "swedishName": "kärrhökar", "taxonCategoryId": 14,
+                 "children": [
+                     {"id": 100034, "scientificName": "Circus cyaneus", "swedishName": "blå kärrhök",
+                      "taxonCategoryId": 17,
+                      "children": [
+                          {"id": 5001, "scientificName": "Circus cyaneus hudsonius", "taxonCategoryId": 18},
+                      ]},
+                 ]},
+                {"id": 100035, "scientificName": "Pernis apivorus", "swedishName": "bivråk",
+                 "taxonCategoryId": 17},
+            ],
+        }))
+        results = adb.search_taxa("circus", under_taxon_id=4000104)
+        # Only the species: not the genus above it, the subspecies below it,
+        # or the species in the branch that does not match.
         self.assertEqual([r["dyntaxa_taxon_id"] for r in results], [100034])
-        self.assertEqual(session.calls[1]["url"],
-                         "https://api.test/taxon/v1/taxa/100034/parentids")
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(session.calls[0]["url"],
+                         "https://api.test/taxon/v1/taxa/4000104/childhierarchy")
 
     def test_api_error_is_raised_with_status(self):
-        _use(self, FakeResponse(status=429, body="slow down"))
+        session = _use(self, *[FakeResponse(status=429, body="slow down")] * (adb.RATE_LIMIT_RETRIES + 1))
+        with mock.patch.object(adb.time, "sleep"):
+            with self.assertRaises(adb.ArtdatabankenAPIError) as ctx:
+                adb.get_taxon(1)
+        self.assertEqual(ctx.exception.status, 429)
+        self.assertTrue(ctx.exception.transient)
+        self.assertEqual(len(session.calls), adb.RATE_LIMIT_RETRIES + 1)
+
+    def test_rate_limit_waits_retry_after_then_retries(self):
+        session = _use(
+            self,
+            FakeResponse(status=429, body="slow down", headers={"Retry-After": "3"}),
+            FakeResponse(body=[{
+                "taxonId": 1,
+                "category": {"value": "Species", "name": "Art"},
+                "names": [{"name": "Plebejus idas", "nameShort": "lat", "isRecommended": True}],
+            }]),
+        )
+        with mock.patch.object(adb.time, "sleep") as sleep:
+            self.assertEqual(adb.get_taxon(1)["dyntaxa_taxon_id"], 1)
+        self.assertEqual(len(session.calls), 2)
+        sleep.assert_called_once_with(3.0)
+
+    def test_rate_limit_asking_for_a_long_wait_is_not_waited_out(self):
+        session = _use(self, FakeResponse(status=429, body="slow down", headers={"Retry-After": "3600"}))
+        with mock.patch.object(adb.time, "sleep") as sleep:
+            with self.assertRaises(adb.ArtdatabankenAPIError) as ctx:
+                adb.get_taxon(1)
+        self.assertEqual(ctx.exception.status, 429)
+        self.assertEqual(len(session.calls), 1)
+        sleep.assert_not_called()
+
+    def test_client_error_is_not_retried_or_transient(self):
+        session = _use(self, FakeResponse(status=400, body="bad filter"))
         with self.assertRaises(adb.ArtdatabankenAPIError) as ctx:
             adb.get_taxon(1)
-        self.assertEqual(ctx.exception.status, 429)
+        self.assertFalse(ctx.exception.transient)
+        self.assertEqual(len(session.calls), 1)
 
     def test_count_observations_parses_shapes(self):
         _use(self, FakeResponse(body={"count": 7}))

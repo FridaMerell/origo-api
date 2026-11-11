@@ -38,12 +38,29 @@ DEFAULT_SMOOTH_WEEKS = 1
 # is enough for a phenogram; this keeps a common species to ~4 SOS pages.
 DEFAULT_MAX_RECORDS = 4000
 
-# Grid zoom for the occupied-cell counts behind Phenogram.significance. Coarse
-# enough that a twitched rarity mobbed at one spot fills one cell, not many.
-SIGNIFICANCE_GRID_ZOOM = 10
-# The area-wide "all taxa" occupied-cell count is the same for every species in
-# an area, so cache it across a fan-out.
-SIGNIFICANCE_AREA_CACHE_TTL = 24 * 60 * 60
+# Grid zoom for the grid cells behind Phenogram.significance: fine enough to
+# tell a province's cells apart. SOS refuses a query with more than 65,535
+# possible cells (a large province or the whole country at 12), and then the
+# next coarser zoom is tried, down to SIGNIFICANCE_MIN_ZOOM.
+SIGNIFICANCE_GRID_ZOOM = 12
+SIGNIFICANCE_MIN_ZOOM = 9
+# Significance pools cell+year pairs over this many whole calendar years.
+SIGNIFICANCE_YEARS = 3
+# A whole year's counts hardly change, so a group's are shared by all its
+# species for this long, and so are the report counts behind relevance and a
+# species' Swedish presence from Artfakta.
+SIGNIFICANCE_CACHE_TTL = 30 * 24 * 60 * 60
+# Artfakta speciesdata/taxonomy: a species whose swedishPresence starts with
+# this and whose immigrationHistory is not SPONTANEOUS (released, escaped or
+# spread from introduced populations, never established) gets no significance.
+# Vagrants that arrived on their own and established introduced species keep it.
+CASUAL_PRESENCE_PREFIX = "Tillfällig"
+SPONTANEOUS = "Spontan"
+# Sweden's bounding box, the whole-country significance area.
+SWEDEN_EXTENT = {
+    "type": "Polygon",
+    "coordinates": [[[10.5, 55.2], [24.2, 55.2], [24.2, 69.1], [10.5, 69.1], [10.5, 55.2]]],
+}
 
 
 def _date_filter(years: int, *, today: datetime.date) -> dict:
@@ -163,90 +180,17 @@ def _row_defaults(curve: dict) -> dict:
     }
 
 
-def _occupied_cells(grid) -> int:
-    """Number of grid cells with at least one observation, tolerant of the
-    ``gridCells`` / ``records`` key difference between API versions."""
+def _taxa_per_cell(grid) -> dict[str, int]:
+    """Taxa reported per occupied grid cell, keyed by the cell's tile
+    position, tolerant of the ``gridCells`` / ``records`` key difference
+    between API versions."""
     cells = (grid or {}).get("gridCells") or (grid or {}).get("records") or []
-    return sum(
-        1 for c in cells
-        if int(c.get("observationsCount") or c.get("count") or 0) > 0
-    )
-
-
-def _significance(species, geo_area, curve):
-    """``(value, basis)`` - rarity of a *report* of this species in this area,
-    from the occupied-cell share against all reporting effort there.
-
-    Two ``GeoGridAggregation`` calls: one filtered to the species, one (cached
-    per area+window) for all taxa. ``geo_area=None`` measures against the whole
-    country.
-    """
-    date = {
-        "startDate": curve["date_from"],
-        "endDate": curve["date_to"],
-        "dateFilterType": "BetweenStartDateAndEndDate",
-    }
-    base = {"date": date, "occurrenceStatus": "Present"}
-    if geo_area is not None and geo_area.geometry:
-        base["geographics"] = {"geometries": [geo_area.geometry]}
-
-    from django.conf import settings
-    grid_timeout = float(
-        (getattr(settings, "ARTDATABANKEN", {}) or {}).get(
-            "PHENOGRAM_TIMEOUT", 60
-        )
-    )
-
-    area_key = "tempus:sig_area:{}:{}:{}:{}".format(
-        geo_area.pk if geo_area is not None else "range",
-        curve["date_from"], curve["date_to"], SIGNIFICANCE_GRID_ZOOM,
-    )
-    area_cells = cache.get(area_key)
-    if area_cells is None:
-        area_cells = _occupied_cells(artdatabanken.geo_grid_aggregation(
-            base, zoom=SIGNIFICANCE_GRID_ZOOM, timeout=grid_timeout))
-        cache.set(area_key, area_cells, SIGNIFICANCE_AREA_CACHE_TTL)
-
-    species_flt = {
-        **base,
-        "taxon": {"ids": [species.dyntaxa_taxon_id], "includeUnderlyingTaxa": True},
-    }
-    species_cells = _occupied_cells(artdatabanken.geo_grid_aggregation(
-        species_flt, zoom=SIGNIFICANCE_GRID_ZOOM, timeout=grid_timeout))
-
-    value = diversity.significance_from_cells(species_cells, area_cells)
-    basis = {
-        "species_cells": species_cells,
-        "area_cells": area_cells,
-        "share": round(species_cells / area_cells, 6) if area_cells else None,
-        "zoom": SIGNIFICANCE_GRID_ZOOM,
-    }
-    return value, basis
-
-
-# Species.significance is a species' rarity among its relatives, so that a
-# group few people report (moths) is not mistaken for a rare one. It is
-# measured within these Dyntaxa ranks (taxon category ids), narrowest first:
-# family, order, class. Never above class: that would be all reporting again.
-REFERENCE_RANKS = (11, 8, 5)
-# A reference group with fewer occupied cells than this is too thin to measure
-# against, and the next rank up is used instead.
-REFERENCE_MIN_CELLS = 200
-# Nor does a group say anything when the species itself fills most of it (a
-# family with one Swedish species): above this share the next rank up is used.
-REFERENCE_MAX_SHARE = 0.75
-# Parents and ranks hardly ever change in Dyntaxa.
-LINEAGE_CACHE_TTL = 30 * 24 * 60 * 60
-# The value counts occupied cell+month pairs over this many whole months, so a
-# species found everywhere but seldom (capercaillie) is not taken for common.
-SEASON_MONTHS = 24
-# The group is counted only in the species' own months, so a migrant is not
-# made rare by the winter it spends abroad. A month is the species' own when it
-# fills at least this share of its busiest month's cells; a stray winter record
-# does not open the whole winter.
-SEASON_SHARE = 0.10
-# A past month's cell count does not change, so a group's is kept this long.
-SEASON_CACHE_TTL = 30 * 24 * 60 * 60
+    counts = {}
+    for c in cells:
+        if int(c.get("observationsCount") or c.get("count") or 0) > 0:
+            key = f"{c['x']}:{c['y']}" if "x" in c and "y" in c else repr(c.get("boundingBox"))
+            counts[key] = int(c.get("taxaCount") or 0)
+    return counts
 
 
 def _grid_timeout() -> float:
@@ -255,133 +199,197 @@ def _grid_timeout() -> float:
     return float((getattr(settings, "ARTDATABANKEN", {}) or {}).get("PHENOGRAM_TIMEOUT", 60))
 
 
-def _parent_and_rank(taxon_id: int) -> tuple[int | None, int | None]:
-    """A Dyntaxa taxon's parent id and rank id, cached across species."""
-    key = f"tempus:dyntaxa_lineage:{taxon_id}"
-    hit = cache.get(key)
-    if hit is None:
-        taxon = artdatabanken.get_taxon(taxon_id)
-        category = (taxon.get("api_data") or {}).get("category") or {}
-        hit = [taxon.get("parent_dyntaxa_taxon_id"), category.get("id") if isinstance(category, dict) else None]
-        cache.set(key, hit, LINEAGE_CACHE_TTL)
-    parent, rank = hit
-    return (int(parent) if parent else None), (int(rank) if rank is not None else None)
-
-
-def reference_groups(species) -> list[int]:
-    """The species' family, order and class as Dyntaxa taxon ids, narrowest
-    first; a rank missing from its lineage is skipped. Stops at class."""
-    parent = species.parent_dyntaxa_taxon_id or _parent_and_rank(species.dyntaxa_taxon_id)[0]
-    groups: list[int] = []
-    seen = {species.dyntaxa_taxon_id}
-    while parent and parent not in seen:
-        seen.add(parent)
-        grandparent, rank = _parent_and_rank(parent)
-        if rank in REFERENCE_RANKS:
-            groups.append(parent)
-            if rank == REFERENCE_RANKS[-1]:
-                break
-        parent = grandparent
-    return groups
-
-
-def _taxon_cells(taxon_id: int, date: dict) -> int:
-    """Occupied grid cells in the whole country for a taxon and its underlying taxa."""
+def _year_filter(taxon_id: int, year: int, geo_area=None) -> dict:
     flt = {
-        "date": date,
+        "date": {
+            "startDate": f"{year}-01-01",
+            "endDate": f"{year}-12-31",
+            "dateFilterType": "BetweenStartDateAndEndDate",
+        },
         "occurrenceStatus": "Present",
         "taxon": {"ids": [int(taxon_id)], "includeUnderlyingTaxa": True},
     }
-    return _occupied_cells(
-        artdatabanken.geo_grid_aggregation(flt, zoom=SIGNIFICANCE_GRID_ZOOM, timeout=_grid_timeout())
+    # Without an area, Sweden's extent: unclipped, the grid spans every stray
+    # coordinate in SOS and passes its 65,535-cell limit.
+    geometry = geo_area.geometry if geo_area is not None and geo_area.geometry else SWEDEN_EXTENT
+    flt["geographics"] = {"geometries": [geometry]}
+    return flt
+
+
+def _cells(taxon_id: int, year: int, geo_area, zoom: int) -> dict[str, int]:
+    """Taxa per occupied grid cell for a taxon and its underlying taxa in one
+    year."""
+    return _taxa_per_cell(artdatabanken.geo_grid_aggregation(
+        _year_filter(taxon_id, year, geo_area), zoom=zoom, timeout=_grid_timeout()))
+
+
+def _too_many_cells(exc: artdatabanken.ArtdatabankenAPIError) -> bool:
+    return exc.status == 400 and "too large" in (exc.body or "")
+
+
+def _group_cells(group: int, year: int, geo_area=None) -> tuple[int, dict[str, int]]:
+    """``(zoom, cells)``: :func:`_cells` for a species group at the finest zoom
+    SOS accepts for the area, shared by all its species, which are counted at
+    the same zoom."""
+    key = "tempus:sig_group_taxa_cells:{}:{}:{}:{}".format(
+        group, geo_area.pk if geo_area is not None else "range", year, SIGNIFICANCE_GRID_ZOOM,
+    )
+    found = cache.get(key)
+    if found is None:
+        zoom = SIGNIFICANCE_GRID_ZOOM
+        while True:
+            try:
+                found = (zoom, _cells(group, year, geo_area, zoom))
+                break
+            except artdatabanken.ArtdatabankenAPIError as exc:
+                if zoom <= SIGNIFICANCE_MIN_ZOOM or not _too_many_cells(exc):
+                    raise
+                zoom -= 1
+        cache.set(key, found, SIGNIFICANCE_CACHE_TTL)
+    return found
+
+
+def _report_count(group: int, years: list[int]) -> int:
+    """Reports of a species group in the whole country over ``years``."""
+    key = f"tempus:group_reports:{group}:{years[0]}:{years[-1]}"
+    count = cache.get(key)
+    if count is None:
+        flt = _year_filter(group, years[0])
+        flt["date"]["endDate"] = f"{years[-1]}-12-31"
+        count = artdatabanken.count_observations(flt, timeout=_grid_timeout())
+        cache.set(key, count, SIGNIFICANCE_CACHE_TTL)
+    return count
+
+
+def _swedish_presence(taxon_id: int) -> dict:
+    """``{"swedishPresence", "immigrationHistory"}`` from Artfakta
+    ``speciesdata/taxonomy`` for one taxon, cached; empty when Artfakta has
+    no entry for it."""
+    key = f"tempus:swedish_presence:{taxon_id}"
+    found = cache.get(key)
+    if found is None:
+        rows = artdatabanken._species_dataset(int(taxon_id), "taxonomy") or []
+        data = (rows[0].get("speciesData") if rows and isinstance(rows[0], dict) else None) or {}
+        found = {
+            "swedishPresence": data.get("swedishPresence") or "",
+            "immigrationHistory": data.get("immigrationHistory") or "",
+        }
+        cache.set(key, found, SIGNIFICANCE_CACHE_TTL)
+    return found
+
+
+def _without_swedish_occurrence(presence: dict) -> bool:
+    """Casual in Sweden and not arrived on its own (see
+    :data:`CASUAL_PRESENCE_PREFIX`)."""
+    return (
+        presence.get("swedishPresence", "").startswith(CASUAL_PRESENCE_PREFIX)
+        and bool(presence.get("immigrationHistory"))
+        and presence.get("immigrationHistory") != SPONTANEOUS
     )
 
 
-def _season_months(today: datetime.date) -> list[dict]:
-    """Date filters for the last :data:`SEASON_MONTHS` whole months, oldest first."""
-    months = []
-    end = today.replace(day=1)
-    for _ in range(SEASON_MONTHS):
-        start = (end - datetime.timedelta(days=1)).replace(day=1)
-        months.append({
-            "startDate": start.isoformat(),
-            "endDate": (end - datetime.timedelta(days=1)).isoformat(),
-            "dateFilterType": "BetweenStartDateAndEndDate",
-        })
-        end = start
-    return months[::-1]
+def primary_group(species) -> int | None:
+    """Dyntaxa taxon id of the species' primary Tempus species group: the
+    primary category (``is_primary``) it is a member of, directly or below in
+    the category tree. With several, the lowest taxon id, so the choice is
+    stable. ``None`` when it has none, or that category has no taxon id."""
+    from tempus.models import SpeciesCategory
+
+    categories = {
+        category.pk: category
+        for category in SpeciesCategory.objects.only("pk", "parent_category", "is_primary", "taxon_id")
+    }
+    found = set()
+    for pk in species.category_memberships.values_list("category_id", flat=True):
+        seen = set()
+        while pk is not None and pk not in seen and pk in categories:
+            seen.add(pk)
+            category = categories[pk]
+            if category.is_primary:
+                if category.taxon_id:
+                    found.add(category.taxon_id)
+                break
+            pk = category.parent_category_id
+    return min(found) if found else None
 
 
-def _cached_cells(key: str, taxon_id: int, date: dict, timeout: int) -> int:
-    cells = cache.get(key)
-    if cells is None:
-        cells = _taxon_cells(taxon_id, date)
-        cache.set(key, cells, timeout)
-    return cells
+def _relevance(group: int, years: list[int]) -> float | None:
+    """How much a species group is reported, against the most reported
+    primary group (see :func:`diversity.relevance_from_counts`)."""
+    from tempus.models import SpeciesCategory
+
+    groups = set(
+        SpeciesCategory.objects.filter(is_primary=True, taxon_id__isnull=False)
+        .values_list("taxon_id", flat=True)
+    ) | {group}
+    top = max(_report_count(taxon_id, years) for taxon_id in groups)
+    return diversity.relevance_from_counts(_report_count(group, years), top)
 
 
-def _reference_group(species, groups: list[int], date: dict) -> int | None:
-    """The narrowest group wide enough to measure against: at least
-    :data:`REFERENCE_MIN_CELLS` cells, with the species in at most
-    :data:`REFERENCE_MAX_SHARE` of them. A species too common for every group
-    is measured against the widest one that is not too thin."""
-    species_cells = _taxon_cells(species.dyntaxa_taxon_id, date)
-    widest = None
-    for group in groups:
-        key = f"tempus:sig_group:{group}:{date['startDate']}:{date['endDate']}:{SIGNIFICANCE_GRID_ZOOM}"
-        group_cells = _cached_cells(key, group, date, SIGNIFICANCE_AREA_CACHE_TTL)
-        if group_cells < REFERENCE_MIN_CELLS:
-            continue
-        if species_cells <= group_cells * REFERENCE_MAX_SHARE:
-            return group
-        widest = group
-    return widest
+def _significance(species, geo_area, *, today: datetime.date):
+    """``(value, basis)`` - how much a *report* of this species in this area
+    stands out: its rarity within its primary Tempus species group there,
+    times the group's relevance.
 
+    Rarity is the species' spread over every grid cell+year pair the group
+    was reported in during the last :data:`SIGNIFICANCE_YEARS` whole years, in
+    this area (``geo_area=None`` is the whole country), each pair weighted by
+    the number of the group's taxa reported in it - how well it is surveyed
+    for the group: Σ weight of the pairs the species is in ÷ Σ weight of all
+    (see :func:`diversity.significance_from_spread`). Reports are not counted,
+    so an inventory or a twitched bird cannot raise a species' spread, and a
+    cell where an inventory reported only its target species weighs almost
+    nothing. Seasons do not enter, only cells.
 
-def refresh_species_significance(species, *, years: int = DEFAULT_YEARS, today: datetime.date | None = None):
-    """Compute and store ``Species.significance`` - how rare a report of this
-    species is among reports of its relatives - without building a phenogram.
-
-    The reference group is the species' family (or order, or class, when the
-    narrower group is too thin or mostly the species itself; see
-    :data:`REFERENCE_RANKS` and :func:`_reference_group`), chosen on occupied
-    cells over the last ``years`` calendar years. The value then sets the
-    species' occupied cell+month pairs over the last :data:`SEASON_MONTHS`
-    whole months against the group's in the same months, counting only the
-    months the species is about (:data:`SEASON_SHARE`). That is one grid call
-    per month for the species; the group's are cached across its species.
-    Red-list status is not folded in; readers add it
-    (``diversity.RED_LIST_BUMP``). Returns the value, or ``None`` when no group
-    is wide enough to measure against; the stored value is then left as it was.
+    The cells are as fine as SOS allows for the area
+    (:data:`SIGNIFICANCE_GRID_ZOOM`, coarser for a large one). One grid call
+    per year for the species; the group's calls, the report counts behind
+    relevance and the species' Swedish presence are cached.
+    ``(None, {})`` when the species has no primary group, ``(None, basis)``
+    when it has no Swedish occurrence (:func:`_without_swedish_occurrence`)
+    or the group has no records in the area.
     """
-    from tempus.models import Species
-
-    years = max(1, min(int(years), MAX_YEARS))
-    today = today or datetime.date.today()
-    groups = reference_groups(species)
-    if not groups:
-        return None
-    group = _reference_group(species, groups, _date_filter(years, today=today))
+    group = primary_group(species)
     if group is None:
-        return None
-
-    months = _season_months(today)
-    own = [_taxon_cells(species.dyntaxa_taxon_id, month) for month in months]
-    # With no record at all every month counts, and the species reads as rare.
-    floor = max(own) * SEASON_SHARE
-    season = [i for i, cells in enumerate(own) if cells >= floor]
-    group_cells = sum(
-        _cached_cells(
-            f"tempus:sig_month:{group}:{months[i]['startDate']}:{SIGNIFICANCE_GRID_ZOOM}",
-            group, months[i], SEASON_CACHE_TTL,
-        )
-        for i in season
+        return None, {}
+    presence = _swedish_presence(species.dyntaxa_taxon_id)
+    if _without_swedish_occurrence(presence):
+        return None, {
+            "swedish_presence": presence["swedishPresence"],
+            "immigration_history": presence["immigrationHistory"],
+        }
+    years = list(range(today.year - SIGNIFICANCE_YEARS, today.year))
+    group_years = {year: _group_cells(group, year, geo_area) for year in years}
+    group_cells = sum(len(cells) for _, cells in group_years.values())
+    basis = {
+        "group": group,
+        "years": years,
+        "group_cells": group_cells,
+        "zoom": [zoom for zoom, _ in group_years.values()],
+    }
+    if not group_cells:
+        return None, basis
+    total_weight = sum(sum(taxa.values()) for _, taxa in group_years.values())
+    if not total_weight:
+        return None, basis
+    species_cells = 0
+    species_weight = 0
+    for year, (zoom, group_taxa) in group_years.items():
+        cells = _cells(species.dyntaxa_taxon_id, year, geo_area, zoom)
+        species_cells += len(cells)
+        species_weight += sum(group_taxa.get(key, 0) for key in cells)
+    spread = species_weight / total_weight if total_weight else 0.0
+    rarity = diversity.significance_from_spread(spread, group_cells)
+    relevance = _relevance(group, years)
+    basis.update(
+        species_cells=species_cells,
+        spread=round(spread, 6),
+        rarity=rarity,
+        relevance=relevance,
     )
-    value = diversity.significance_from_cells(sum(own[i] for i in season), group_cells)
-    if value is None:
-        return None
-    Species.objects.filter(pk=species.pk).update(significance=value)
-    return value
+    if rarity is None or relevance is None:
+        return None, basis
+    return round(rarity * relevance, 3), basis
 
 
 def get_phenogram(
@@ -400,8 +408,12 @@ def get_phenogram(
     ``create=False`` and enqueue :func:`tempus.tasks.generate_phenogram`
     instead, getting ``None`` until the worker has run. Never triggered by a
     plain read.
+
+    A build also measures the significance of a report of the species in the
+    area (:func:`_significance`); the whole-range build stores it on the
+    species too. When the measurement fails, the stored values are kept.
     """
-    from tempus.models import Phenogram
+    from tempus.models import Phenogram, Species
 
     years = max(1, min(int(years), MAX_YEARS))
     existing = Phenogram.objects.filter(
@@ -420,7 +432,7 @@ def get_phenogram(
     )
     defaults = _row_defaults(curve)
     try:
-        value, basis = _significance(species, geo_area, curve)
+        value, basis = _significance(species, geo_area, today=today or datetime.date.today())
         defaults["significance"] = value
         defaults["significance_basis"] = basis
     except (
@@ -431,12 +443,12 @@ def get_phenogram(
             "significance for %s / %s skipped: %s", species, geo_area or "range", exc
         )
 
-    # Species.significance is measured against the species' relatives by
-    # refresh_species_significance, so this whole-range value is not copied there.
     row, _ = Phenogram.objects.update_or_create(
         species=species,
         geo_area=geo_area,
         years=years,
         defaults=defaults,
     )
+    if geo_area is None and "significance" in defaults:
+        Species.objects.filter(pk=species.pk).update(significance=defaults["significance"])
     return row

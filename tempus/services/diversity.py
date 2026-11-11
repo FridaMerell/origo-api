@@ -42,6 +42,9 @@ DEFAULT_SIGNIFICANCE = 0.3
 # significance_from_cells: an occupied-cell share of 10**-SIGNIFICANCE_LOG_SPAN
 # maps to 1.0; a share of 1.0 maps to 0.0.
 SIGNIFICANCE_LOG_SPAN = 4.0
+# relevance_from_counts: a group reported 10**-RELEVANCE_LOG_SPAN as much as the
+# most reported group maps to 0.0; the most reported group maps to 1.0.
+RELEVANCE_LOG_SPAN = 4.0
 # In Sweden many still-common species are red-listed (declining populations), so
 # red-list status *adds* to significance rather than replacing it - a widespread
 # NT bird stays un-notable, a genuinely scarce one is pushed over the line, and
@@ -122,6 +125,37 @@ def significance_from_cells(species_cells: int, area_cells: int) -> float | None
         return None
     share = max(species_cells, 1) / area_cells
     raw = -math.log10(min(share, 1.0)) / SIGNIFICANCE_LOG_SPAN
+    return round(max(0.0, min(1.0, raw)), 3)
+
+
+def significance_from_spread(spread: float, group_cells: int) -> float:
+    """Rarity of a *report* of a taxon within its species group, on a 0..1 scale.
+
+    ``spread`` is the taxon's weighted share of the group's grid cell+year
+    pairs (0..1) and ``group_cells`` the number of those pairs. Spread in one
+    pair out of all maps to 1.0, spread in all of them to 0.0, logarithmic in
+    between, so the scale follows how finely the group's cells divide the
+    area. No spread at all (not reported in the area) is 1.0.
+    """
+    if spread <= 0:
+        return 1.0
+    if group_cells <= 1:
+        return 0.0
+    raw = math.log(1 / min(spread, 1.0)) / math.log(group_cells)
+    return round(max(0.0, min(1.0, raw)), 3)
+
+
+def relevance_from_counts(group_reports: int, top_reports: int) -> float | None:
+    """How much a species group is reported, on a 0..1 scale, so that a rare
+    species of a group hardly anyone reports (harvestmen) does not outweigh
+    one of a group many follow. ``group_reports`` / ``top_reports`` are report
+    counts of the group and of the most reported group; a group reported
+    10**-RELEVANCE_LOG_SPAN as much as the top one maps to 0.0. ``None`` when
+    there is nothing to compare with."""
+    if top_reports <= 0:
+        return None
+    share = max(group_reports, 1) / top_reports
+    raw = 1 + math.log10(min(share, 1.0)) / RELEVANCE_LOG_SPAN
     return round(max(0.0, min(1.0, raw)), 3)
 
 

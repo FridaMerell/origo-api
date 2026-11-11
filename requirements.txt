@@ -17,6 +17,7 @@ pywebpush==2.5.0
 # symlink that pip refuses to unpack. 1.9.4 is the version running locally.
 py-vapid==1.9.4
 astronomy-engine==2.1.19
+icalendar==7.3.0
 pypdf==6.19.0
 python-docx==1.2.0
 fonttools==4.60.1

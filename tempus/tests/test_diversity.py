@@ -27,6 +27,34 @@ class SignificanceFromCellsTests(SimpleTestCase):
         self.assertIsNone(diversity.significance_from_cells(5, 0))
 
 
+class SignificanceFromSpreadTests(SimpleTestCase):
+    def test_small_spread_is_rare(self):
+        # weighted spread among butterflies, whole country 2023-2025
+        # (8,509 cell+year pairs): väddnätfjäril against citronfjäril
+        self.assertGreater(diversity.significance_from_spread(0.047, 8_509), 0.3)
+        self.assertLess(diversity.significance_from_spread(0.79, 8_509), 0.05)
+
+    def test_bounds(self):
+        self.assertEqual(diversity.significance_from_spread(0.0, 100), 1.0)
+        self.assertEqual(diversity.significance_from_spread(1 / 100, 100), 1.0)
+        self.assertEqual(diversity.significance_from_spread(1.0, 100), 0.0)
+        self.assertEqual(diversity.significance_from_spread(0.5, 1), 0.0)
+
+
+class RelevanceFromCountsTests(SimpleTestCase):
+    def test_most_reported_group_is_fully_relevant(self):
+        self.assertEqual(diversity.relevance_from_counts(25_000_000, 25_000_000), 1.0)
+
+    def test_seldom_reported_group_is_damped(self):
+        # Report counts 2021-2025: harvestmen against birds.
+        self.assertLess(diversity.relevance_from_counts(10_988, 25_170_677), 0.2)
+        # Butterflies and moths against birds.
+        self.assertGreater(diversity.relevance_from_counts(2_114_222, 25_170_677), 0.7)
+
+    def test_no_top_group_is_none(self):
+        self.assertIsNone(diversity.relevance_from_counts(5, 0))
+
+
 class RedListBumpTests(SimpleTestCase):
     def test_widespread_nt_bird_stays_un_notable(self):
         row = TaxonRow(1, 5, red_list_category="NT", significance=0.05)
