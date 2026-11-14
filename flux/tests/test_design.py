@@ -6,6 +6,7 @@ from flux.models import (
     Document,
     Entity,
     Field,
+    Integration,
     Milestone,
     Project,
     Relation,
@@ -460,3 +461,153 @@ class CodexStatusTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Task.objects.get(pk=task.pk).status, 'not_started')
+
+
+class CodexTaskUpdateTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='codex-user', password='x')
+        _token, plaintext = CodexToken.issue(self.user)
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f'codex {plaintext}')
+        plan = {
+            'name': 'Plan',
+            'milestones': [{'ref': 'm1', 'title': 'Beta'}, {'ref': 'm2', 'title': 'Release'}],
+            'tasks': [{'ref': 't1', 'title': 'Write docs', 'milestone_ref': 'm1', 'priority': 'high'}],
+        }
+        self.project = self.client.post('/api/flux/codex/projects/', plan, format='json').data
+        self.task_id = self.project['tasks'][0]['id']
+        self.milestones = {item['title']: item['id'] for item in self.project['milestones']}
+
+    def patch(self, data, task_id=None, project_id=None):
+        return self.client.patch(
+            f'/api/flux/codex/projects/{project_id or self.project["id"]}/tasks/{task_id or self.task_id}/',
+            data,
+            format='json',
+        )
+
+    def test_moves_the_task_to_another_milestone_and_keeps_the_rest(self):
+        response = self.patch({'milestone_id': self.milestones['Release']})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['milestone_id'], self.milestones['Release'])
+        task = Task.objects.get(pk=self.task_id)
+        self.assertEqual(task.milestone_id, self.milestones['Release'])
+        self.assertEqual(task.title, 'Write docs')
+        self.assertEqual(task.priority, 'high')
+
+    def test_detaches_the_milestone_with_null(self):
+        response = self.patch({'milestone_id': None})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(Task.objects.get(pk=self.task_id).milestone_id)
+
+    def test_updates_several_fields(self):
+        response = self.patch({'title': 'Write the docs', 'due_date': '2026-12-01', 'status': 'in_progress'})
+
+        self.assertEqual(response.status_code, 200)
+        task = Task.objects.get(pk=self.task_id)
+        self.assertEqual(task.title, 'Write the docs')
+        self.assertEqual(task.due_date.isoformat(), '2026-12-01')
+        self.assertEqual(task.status, 'in_progress')
+
+    def test_milestone_from_another_project_is_rejected(self):
+        other = self.client.post(
+            '/api/flux/codex/projects/', {'name': 'Other', 'milestones': [{'ref': 'm', 'title': 'Elsewhere'}]}, format='json'
+        ).data
+
+        response = self.patch({'milestone_id': other['milestones'][0]['id']})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Task.objects.get(pk=self.task_id).milestone_id, self.milestones['Beta'])
+
+    def test_empty_payload_is_rejected(self):
+        self.assertEqual(self.patch({}).status_code, 400)
+
+    def test_cannot_update_a_task_in_someone_elses_project(self):
+        stranger = User.objects.create_user(username='stranger', password='x')
+        foreign = Project.objects.create(name='Not yours')
+        foreign.members.add(stranger)
+        task = Task.objects.create(project=foreign, title='Secret')
+
+        response = self.patch({'title': 'Mine now'}, task_id=task.pk, project_id=foreign.pk)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Task.objects.get(pk=task.pk).title, 'Secret')
+
+
+class CodexIntegrationUpdateTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='codex-user', password='x')
+        _token, plaintext = CodexToken.issue(self.user)
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f'codex {plaintext}')
+        plan = {
+            'name': 'Plan',
+            'integrations': [
+                {
+                    'name': 'Weather',
+                    'kind': 'api',
+                    'description': 'Old text',
+                    'base_url': 'https://api.example.com',
+                    'auth_type': 'api_key_header',
+                    'auth_name': 'X-Key',
+                    'auth_env_var': 'WEATHER_KEY',
+                },
+                {'name': 'Stripe', 'kind': 'payment'},
+            ],
+        }
+        self.project = self.client.post('/api/flux/codex/projects/', plan, format='json').data
+        self.integrations = {item['name']: item['id'] for item in self.project['integrations']}
+
+    def patch(self, data, integration_id=None, project_id=None):
+        return self.client.patch(
+            f'/api/flux/codex/projects/{project_id or self.project["id"]}/integrations/'
+            f'{integration_id or self.integrations["Weather"]}/',
+            data,
+            format='json',
+        )
+
+    def test_updates_the_description_and_keeps_the_rest(self):
+        response = self.patch({'description': 'New text'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['description'], 'New text')
+        integration = Integration.objects.get(pk=self.integrations['Weather'])
+        self.assertEqual(integration.description, 'New text')
+        self.assertEqual(integration.auth_type, 'api_key_header')
+        self.assertEqual(integration.auth_name, 'X-Key')
+        self.assertEqual(integration.base_url, 'https://api.example.com')
+
+    def test_one_auth_field_is_merged_with_the_stored_ones(self):
+        response = self.patch({'auth_env_var': 'WEATHER_TOKEN'})
+
+        self.assertEqual(response.status_code, 200)
+        integration = Integration.objects.get(pk=self.integrations['Weather'])
+        self.assertEqual(integration.auth_env_var, 'WEATHER_TOKEN')
+        self.assertEqual(integration.auth_name, 'X-Key')
+
+    def test_invalid_auth_is_rejected(self):
+        response = self.patch({'auth_type': 'magic'})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Integration.objects.get(pk=self.integrations['Weather']).auth_type, 'api_key_header')
+
+    def test_invalid_base_url_is_rejected(self):
+        self.assertEqual(self.patch({'base_url': 'http://insecure.example.com'}).status_code, 400)
+
+    def test_duplicate_name_is_rejected(self):
+        self.assertEqual(self.patch({'name': 'Stripe'}).status_code, 400)
+
+    def test_empty_payload_is_rejected(self):
+        self.assertEqual(self.patch({}).status_code, 400)
+
+    def test_cannot_update_an_integration_in_someone_elses_project(self):
+        stranger = User.objects.create_user(username='stranger', password='x')
+        foreign = Project.objects.create(name='Not yours')
+        foreign.members.add(stranger)
+        integration = Integration.objects.create(project=foreign, name='Secret', description='Theirs')
+
+        response = self.patch({'description': 'Mine'}, integration_id=integration.pk, project_id=foreign.pk)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Integration.objects.get(pk=integration.pk).description, 'Theirs')

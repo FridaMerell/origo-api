@@ -28,6 +28,8 @@ from flux.views import (
     CodexProjectScaffoldView,
     CodexProjectTaskCreateView,
     CodexProjectTaskStatusView,
+    CodexProjectTaskUpdateView,
+    CodexProjectIntegrationUpdateView,
     DocumentViewSet,
     EntityViewSet,
     FieldViewSet,
@@ -99,6 +101,16 @@ urlpatterns = [
     path('codex/projects/<int:project_id>/relations/', CodexProjectRelationsView.as_view(), name='codex-project-relations'),
     path('codex/projects/<int:project_id>/scaffold/', CodexProjectScaffoldView.as_view(), name='codex-project-scaffold'),
     path('codex/projects/<int:project_id>/tasks/', CodexProjectTaskCreateView.as_view(), name='codex-project-task-create'),
+    path(
+        'codex/projects/<int:project_id>/tasks/<int:task_id>/',
+        CodexProjectTaskUpdateView.as_view(),
+        name='codex-project-task-update',
+    ),
+    path(
+        'codex/projects/<int:project_id>/integrations/<int:integration_id>/',
+        CodexProjectIntegrationUpdateView.as_view(),
+        name='codex-project-integration-update',
+    ),
     path(
         'codex/projects/<int:project_id>/tasks/<int:task_id>/status/',
         CodexProjectTaskStatusView.as_view(),

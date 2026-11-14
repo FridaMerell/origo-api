@@ -24,6 +24,8 @@ from .codex import (
     CodexProjectScaffoldView,
     CodexProjectTaskCreateView,
     CodexProjectTaskStatusView,
+    CodexProjectTaskUpdateView,
+    CodexProjectIntegrationUpdateView,
 )
 from .datamodel import EntityViewSet, FieldViewSet, RelationViewSet
 from .design import (
@@ -76,6 +78,8 @@ __all__ = [
     "CodexProjectScaffoldView",
     "CodexProjectTaskCreateView",
     "CodexProjectTaskStatusView",
+    "CodexProjectTaskUpdateView",
+    "CodexProjectIntegrationUpdateView",
     "DocumentViewSet",
     "EntityViewSet",
     "FieldViewSet",

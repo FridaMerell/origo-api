@@ -69,7 +69,9 @@ def calendar_feed(request):
     if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
         return HttpResponseBadRequest("lat or lon is out of range.")
     response = HttpResponse(calendar.calendar_feed(latitude, longitude), content_type="text/calendar; charset=utf-8")
-    response["Content-Disposition"] = 'inline; filename="caelus.ics"'
+    # As an attachment, so a clicked link makes the browser offer to open the
+    # file in the calendar app instead of showing it as text.
+    response["Content-Disposition"] = 'attachment; filename="caelus.ics"'
     return response
 
 

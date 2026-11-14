@@ -1583,3 +1583,167 @@ def update_task_status_in_private_project(user, project_id, task_id, payload):
 def update_milestone_status_in_private_project(user, project_id, milestone_id, payload):
     """Set the status of one milestone in an existing private project."""
     return _set_status(user, project_id, Milestone, milestone_id, payload, 'Milestone')
+
+
+TASK_FIELDS = ('title', 'description', 'priority', 'status', 'due_date', 'milestone_id')
+
+
+def update_task_in_private_project(user, project_id, task_id, payload):
+    """Partially update one task in place, in an existing private project.
+
+    Only the fields present in ``payload`` are changed. ``milestone_id``, when
+    given, must belong to the same project, or ``null`` to detach - same
+    validation as ``add_task_to_private_project``. Saving goes through the
+    model, so recurrence signals still fire on a status change.
+    """
+    if not isinstance(payload, dict):
+        raise CodexPlanError('task must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        task = Task.objects.get(pk=task_id, project=project)
+    except Task.DoesNotExist as exc:
+        raise CodexPlanError('Task not found in this project.') from exc
+
+    update_fields = []
+    if 'title' in payload:
+        task.title = _text(payload.get('title'), 'task.title', required=True)
+        update_fields.append('title')
+    if 'description' in payload:
+        task.description = _text(payload.get('description'), 'task.description', maximum=10000)
+        update_fields.append('description')
+    if 'priority' in payload:
+        task.priority = _choice(payload, 'priority', Task.Priority.values, task.priority)
+        update_fields.append('priority')
+    if 'status' in payload:
+        task.status = _choice(payload, 'status', Task.Status.values, task.status)
+        update_fields.append('status')
+    if 'due_date' in payload:
+        task.due_date = _date(payload.get('due_date'), 'task.due_date')
+        update_fields.append('due_date')
+    if 'milestone_id' in payload:
+        milestone_id = _optional_id(payload.get('milestone_id'), 'milestone_id')
+        milestone = None
+        if milestone_id is not None:
+            try:
+                milestone = Milestone.objects.get(pk=milestone_id, project=project)
+            except Milestone.DoesNotExist as exc:
+                raise CodexPlanError('milestone_id must belong to this project.') from exc
+        task.milestone = milestone
+        update_fields.append('milestone')
+
+    if not update_fields:
+        raise CodexPlanError(f'At least one of {", ".join(TASK_FIELDS)} must be given.')
+
+    update_fields.append('updated_at')
+    task.save(update_fields=update_fields)
+    return {
+        'id': task.id,
+        'project_id': project.id,
+        'title': task.title,
+        'description': task.description,
+        'milestone_id': task.milestone_id,
+        'parent_id': task.parent_id,
+        'due_date': task.due_date.isoformat() if task.due_date else None,
+        'priority': task.priority,
+        'status': task.status,
+        'updated_at': task.updated_at.isoformat(),
+    }
+
+
+INTEGRATION_AUTH_FIELDS = ('auth_type', 'auth_name', 'auth_env_var', 'auth_secret_env_var', 'oauth_token_url')
+
+
+def update_integration_in_private_project(user, project_id, integration_id, payload):
+    """Partially update one integration's settings in place, in an existing private project.
+
+    Only the fields present in ``payload`` are changed; its operations are left
+    as they are. The auth settings are validated together, as on creation: the
+    given ``auth_*`` keys are merged with the stored ones before checking, so
+    changing only ``auth_env_var`` keeps the rest.
+    """
+    if not isinstance(payload, dict):
+        raise CodexPlanError('integration must be an object.')
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        integration = Integration.objects.get(pk=integration_id, project=project)
+    except Integration.DoesNotExist as exc:
+        raise CodexPlanError('Integration not found in this project.') from exc
+
+    update_fields = []
+    if 'name' in payload:
+        name = _text(payload.get('name'), 'integration.name', required=True, maximum=100)
+        if project.integrations.filter(name=name).exclude(pk=integration.pk).exists():
+            raise CodexPlanError(f'Integration name already exists in this project: {name}.')
+        integration.name = name
+        update_fields.append('name')
+    if 'kind' in payload:
+        integration.kind = _choice(payload, 'kind', Integration.Kind.values, integration.kind)
+        update_fields.append('kind')
+    if 'description' in payload:
+        integration.description = _text(payload.get('description'), 'integration.description', maximum=10000)
+        update_fields.append('description')
+    if 'env_vars' in payload:
+        integration.env_vars = _string_list(payload, 'env_vars')
+        update_fields.append('env_vars')
+    try:
+        if 'base_url' in payload:
+            integration.base_url = integration_rules.clean_base_url(payload.get('base_url'))
+            update_fields.append('base_url')
+        if any(field in payload for field in INTEGRATION_AUTH_FIELDS):
+            merged = {field: getattr(integration, field) for field in INTEGRATION_AUTH_FIELDS}
+            merged.update({field: payload[field] for field in INTEGRATION_AUTH_FIELDS if field in payload})
+            for field, value in integration_rules.clean_auth(merged).items():
+                setattr(integration, field, value)
+            update_fields.extend(INTEGRATION_AUTH_FIELDS)
+    except ValueError as exc:
+        raise CodexPlanError(f'{integration.name}: {exc}') from exc
+    if 'timeout_seconds' in payload:
+        integration.timeout_seconds = _int_in_range(payload, 'timeout_seconds', 1, 120, integration.timeout_seconds)
+        update_fields.append('timeout_seconds')
+    if 'retries' in payload:
+        integration.retries = _int_in_range(payload, 'retries', 0, 5, integration.retries)
+        update_fields.append('retries')
+    if 'rate_limit_per_minute' in payload:
+        rate = payload.get('rate_limit_per_minute')
+        integration.rate_limit_per_minute = (
+            None if rate is None else _int_in_range(payload, 'rate_limit_per_minute', 1, 100000, 1)
+        )
+        update_fields.append('rate_limit_per_minute')
+    if 'cache_ttl_seconds' in payload:
+        integration.cache_ttl_seconds = _int_in_range(
+            payload, 'cache_ttl_seconds', 0, 31536000, integration.cache_ttl_seconds
+        )
+        update_fields.append('cache_ttl_seconds')
+
+    if not update_fields:
+        raise CodexPlanError(
+            'At least one of name, kind, description, env_vars, base_url, auth_type, auth_name, '
+            'auth_env_var, auth_secret_env_var, oauth_token_url, timeout_seconds, retries, '
+            'rate_limit_per_minute, cache_ttl_seconds must be given.'
+        )
+
+    integration.save(update_fields=update_fields)
+    return {
+        'id': integration.id,
+        'project_id': project.id,
+        'name': integration.name,
+        'kind': integration.kind,
+        'description': integration.description,
+        'env_vars': integration.env_vars,
+        'base_url': integration.base_url,
+        'auth_type': integration.auth_type,
+        'auth_name': integration.auth_name,
+        'auth_env_var': integration.auth_env_var,
+        'auth_secret_env_var': integration.auth_secret_env_var,
+        'oauth_token_url': integration.oauth_token_url,
+        'timeout_seconds': integration.timeout_seconds,
+        'retries': integration.retries,
+        'rate_limit_per_minute': integration.rate_limit_per_minute,
+        'cache_ttl_seconds': integration.cache_ttl_seconds,
+    }

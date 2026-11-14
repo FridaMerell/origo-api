@@ -27,6 +27,8 @@ from flux.codex_plans import (
     update_role_in_private_project,
     update_screen_in_private_project,
     update_document_in_private_project,
+    update_integration_in_private_project,
+    update_task_in_private_project,
     create_api_projection_in_private_project,
     update_api_projection_in_private_project,
     delete_api_projection_in_private_project,
@@ -269,6 +271,36 @@ class CodexProjectTaskStatusView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(task)
+
+
+class CodexProjectTaskUpdateView(APIView):
+    """Partially update one task in place within an existing private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, task_id):
+        try:
+            task = update_task_in_private_project(request.user, project_id, task_id, request.data)
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(task)
+
+
+class CodexProjectIntegrationUpdateView(APIView):
+    """Partially update one integration's settings within an existing private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, integration_id):
+        try:
+            integration = update_integration_in_private_project(
+                request.user, project_id, integration_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(integration)
 
 
 class CodexProjectMilestoneStatusView(APIView):
