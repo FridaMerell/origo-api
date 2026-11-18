@@ -1,6 +1,6 @@
 """ResidentialHeating connection and a live proxy to its log API."""
 import requests
-from rest_framework import permissions, status, viewsets
+from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -20,6 +20,25 @@ def fetch_upstream(heating, path, params=None):
     except requests.RequestException as exc:
         return None, Response({'detail': f'Could not reach {url}: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
     if not response.ok and response.status_code != status.HTTP_404_NOT_FOUND:
+        return None, Response(
+            {'detail': f'{url} responded {response.status_code}: {response.text[:300]}'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    return response, None
+
+
+def post_upstream(heating, path, data):
+    """POST JSON to ``{base_url}{path}`` with the house's token.
+
+    Returns ``(response, None)`` for any answer from the external API (its 2xx and 400 are passed on by the
+    caller), otherwise ``(None, error_response)`` carrying the real cause as a 502.
+    """
+    url = f"{heating.base_url.rstrip('/')}{path}"
+    try:
+        response = requests.post(url, json=data, headers={'Authorization': f'Token {heating.token}'}, timeout=15)
+    except requests.RequestException as exc:
+        return None, Response({'detail': f'Could not reach {url}: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    if not response.ok and response.status_code != status.HTTP_400_BAD_REQUEST:
         return None, Response(
             {'detail': f'{url} responded {response.status_code}: {response.text[:300]}'},
             status=status.HTTP_502_BAD_GATEWAY,
@@ -63,6 +82,57 @@ class ResidentialHeatingViewSet(viewsets.ModelViewSet):
         except (ValueError, KeyError, TypeError):
             return Response(
                 {'detail': f'{response.url} did not return a paginated log list: {response.text[:300]}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+    @action(detail=True, methods=['get', 'post'])
+    def fireplace(self, request, pk=None):
+        """GET: one page (?page=, newest first) of the house device's registered fireplace heatings.
+        POST ``{start_time}``: register one on the house's device. Nothing is stored in Verso.
+        """
+        heating = self.get_object()
+        if request.method == 'POST':
+            start_time = serializers.DateTimeField()
+            try:
+                start_time = start_time.run_validation(
+                    request.data.get('start_time') if isinstance(request.data, dict) else None
+                )
+            except serializers.ValidationError as exc:
+                return Response({'start_time': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+            response, error = post_upstream(
+                heating, '/fireplace-heating/', {'device': heating.device, 'start_time': start_time.isoformat()}
+            )
+            if error:
+                return error
+            try:
+                return Response(response.json(), status=response.status_code)
+            except ValueError:
+                return Response(
+                    {'detail': f'{response.url} did not return JSON: {response.text[:300]}'},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+        try:
+            page = int(request.query_params.get('page', 1))
+        except ValueError:
+            return Response({'detail': 'page must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+        response, error = fetch_upstream(heating, '/fireplace-heating/', {'device': heating.device, 'page': page})
+        if error:
+            return error
+        if response.status_code == status.HTTP_404_NOT_FOUND:
+            return Response({'detail': f'Page {page} does not exist.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            payload = response.json()
+            return Response({
+                'count': payload['count'],
+                'page': page,
+                'next_page': page + 1 if payload['next'] else None,
+                'previous_page': page - 1 if payload['previous'] else None,
+                'results': payload['results'],
+            })
+        except (ValueError, KeyError, TypeError):
+            return Response(
+                {'detail': f'{response.url} did not return a paginated list: {response.text[:300]}'},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
