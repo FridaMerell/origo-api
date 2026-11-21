@@ -46,6 +46,19 @@ def post_upstream(heating, path, data):
     return response, None
 
 
+def delete_upstream(heating, path):
+    """DELETE ``{base_url}{path}`` with the house's token.
+
+    The upstream status is returned unchanged so callers can give the user its specific error.
+    """
+    url = f"{heating.base_url.rstrip('/')}{path}"
+    try:
+        response = requests.delete(url, headers={'Authorization': f'Token {heating.token}'}, timeout=15)
+    except requests.RequestException as exc:
+        return None, Response({'detail': f'Could not reach {url}: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+    return response, None
+
+
 class ResidentialHeatingViewSet(viewsets.ModelViewSet):
     serializer_class = ResidentialHeatingSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -135,6 +148,42 @@ class ResidentialHeatingViewSet(viewsets.ModelViewSet):
                 {'detail': f'{response.url} did not return a paginated list: {response.text[:300]}'},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
+    @action(detail=True, methods=['delete'], url_path=r'fireplace/(?P<fireplace_id>\d+)')
+    def delete_fireplace(self, request, pk=None, fireplace_id=None):
+        """Remove one fireplace heating, only when it belongs to this house's device."""
+        heating = self.get_object()
+        not_found = Response({'detail': 'Brasan finns inte.'}, status=status.HTTP_404_NOT_FOUND)
+
+        response, error = fetch_upstream(heating, f'/fireplace-heating/{fireplace_id}/')
+        if error:
+            return error
+        if response.status_code == status.HTTP_404_NOT_FOUND:
+            return not_found
+        try:
+            fireplace = response.json()
+            if fireplace['device'] != heating.device:
+                return not_found
+        except (ValueError, KeyError, TypeError):
+            return Response(
+                {'detail': f'{response.url} did not return a fireplace heating: {response.text[:300]}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        response, error = delete_upstream(heating, f'/fireplace-heating/{fireplace_id}/')
+        if error:
+            return error
+        if response.status_code == status.HTTP_404_NOT_FOUND:
+            return not_found
+        if not response.ok:
+            try:
+                return Response(response.json(), status=response.status_code)
+            except ValueError:
+                return Response(
+                    {'detail': f'{response.url} responded {response.status_code}: {response.text[:300]}'},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['get'], url_path=r'logs/(?P<log_id>\d+)')
     def log(self, request, pk=None, log_id=None):
