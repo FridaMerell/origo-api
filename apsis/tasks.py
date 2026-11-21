@@ -36,18 +36,12 @@ def _newsletter_message(post):
 
 @task()
 def send_weekly_apsis_newsletter():
-    """Notify users about the latest weekly apse post and re-schedule."""
+    """Notify users about a random apse post and re-schedule."""
     try:
-        post = (
-            Post.objects.filter(
-                has_apsis=True,
-                created_at__gte=timezone.now() - timedelta(days=7),
-            )
-            .order_by("-created_at")
-            .first()
-        )
+        # One random apse post, the same for everyone this week.
+        post = Post.objects.filter(has_apsis=True).order_by("?").first()
         if post is None:
-            return {"sent": 0, "reason": "no_apsis_post_this_week"}
+            return {"sent": 0, "reason": "no_apsis_post"}
         user_model = get_user_model()
         notifications = []
         for user in user_model.objects.filter(is_active=True):
