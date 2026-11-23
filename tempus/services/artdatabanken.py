@@ -21,6 +21,7 @@ should be confirmed against that document.
 import datetime
 import logging
 import os
+import re
 import tempfile
 import time
 from contextlib import contextmanager
@@ -560,14 +561,59 @@ def get_taxon(taxon_id: int) -> TaxonData:
     return hits[0]
 
 
-def get_species_information(taxon_id: int) -> dict[str, Any]:
-    """Fetch Artfakta species information for a Dyntaxa taxon ID."""
+# Artfakta species data (texts, red list, conservation, ...) is cached this long.
+SPECIES_DATA_CACHE_TTL = 24 * 60 * 60
+# Part of the cache key: bump it when get_species_data's shape changes.
+_SPECIES_DATA_VERSION = 1
+
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _snake(value: Any) -> Any:
+    """Artfakta's camelCase keys -> snake_case, recursively."""
+    if isinstance(value, dict):
+        return {_CAMEL_BOUNDARY.sub("_", key).lower(): _snake(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_snake(item) for item in value]
+    return value
+
+
+def get_species_data(taxon_id: int) -> dict[str, Any] | None:
+    """All Artfakta species data for a Dyntaxa taxon ID, or None when Artfakta has none.
+
+    ``GET {SPECIES_INFORMATION_URL}/speciesdataservice/v1/speciesdata?taxa=<id>``
+    returns ``[{"speciesData": {...}, "taxonId", "parentId", "swedishName",
+    "scientificName", "category", ...}]``. ``speciesData`` holds the species
+    texts (``speciesFactText``: characteristic, spreadAndStatus, ecology,
+    threat, conservationMeasures, other - each as text, HTML and changed
+    date), ``redlistInfo``, ``taxonRelatedInformation``, ``natureConservation``,
+    ``landscapeTypes``, ``biotopes``, ``substrateInformation``,
+    ``ecologicalGroups`` and ``conservationAssessments``. Everything is passed
+    on with snake_case keys, the row's taxon fields merged in.
+    """
     if taxon_id <= 0:
         raise ValueError("taxon_id must be a positive integer")
-    return _call(
+    cache_key = f"artdatabanken:species-data:{_SPECIES_DATA_VERSION}:{taxon_id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached or None
+
+    rows = _call(
         "GET", "SPECIES_INFORMATION_URL", "SUBSCRIPTION_KEY_SPECIES_INFORMATION",
-        f"/species/{taxon_id}",
+        "/speciesdataservice/v1/speciesdata",
+        params={"taxa": taxon_id},
     )
+    row = next(
+        (r for r in rows or [] if isinstance(r, dict) and r.get("taxonId") == taxon_id),
+        None,
+    )
+    result = None
+    if row is not None:
+        taxon_fields = {key: value for key, value in row.items() if key != "speciesData"}
+        result = _snake({**taxon_fields, **(row.get("speciesData") or {})})
+    # An empty dict marks "Artfakta has nothing" so that is cached too.
+    cache.set(cache_key, result or {}, SPECIES_DATA_CACHE_TTL)
+    return result
 
 
 # Artfakta significance labels -> stored two-level code ("stor" > "har").
@@ -711,7 +757,7 @@ def upsert_species(taxon_id: int, *, taxon: TaxonData | None = None) -> Species:
     taxon = taxon or get_taxon(taxon_id)
     raw_data = dict(taxon["api_data"])
     try:
-        raw_data["species_information"] = get_species_information(taxon_id)
+        raw_data["species_information"] = get_species_data(taxon_id)
     except (ArtdatabankenConfigurationError, ArtdatabankenAPIError):
         raw_data["species_information"] = None
 

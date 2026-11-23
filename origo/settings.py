@@ -314,6 +314,10 @@ APSIS_NEWSLETTER_TIME_ZONE = os.environ.get(
 # Svenska kyrkan API key (Platser and Kyrkobyggnadsregistret), used to connect Apsis posts to a church.
 SVENSKAKYRKAN_TOKEN = os.environ.get("SVENSKAKYRKAN_TOKEN", "")
 
+# xeno-canto API v3 key (https://xeno-canto.org/account), used by Tempus to fetch
+# recordings per species; see tempus/services/xeno_canto.py.
+XENO_CANTO_API_KEY = os.environ.get("XENO_CANTO_API_KEY", "")
+
 
 # Web Push (VAPID)
 # One key pair, generated once (`vapid --gen` / `npx web-push generate-vapid-keys`).

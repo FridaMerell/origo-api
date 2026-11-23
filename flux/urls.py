@@ -30,6 +30,8 @@ from flux.views import (
     CodexProjectTaskStatusView,
     CodexProjectTaskUpdateView,
     CodexProjectIntegrationUpdateView,
+    CodexProjectIntegrationOperationCollectionView,
+    CodexProjectIntegrationOperationDetailView,
     DocumentViewSet,
     EntityViewSet,
     FieldViewSet,
@@ -110,6 +112,16 @@ urlpatterns = [
         'codex/projects/<int:project_id>/integrations/<int:integration_id>/',
         CodexProjectIntegrationUpdateView.as_view(),
         name='codex-project-integration-update',
+    ),
+    path(
+        'codex/projects/<int:project_id>/integrations/<int:integration_id>/operations/',
+        CodexProjectIntegrationOperationCollectionView.as_view(),
+        name='codex-project-integration-operation-create',
+    ),
+    path(
+        'codex/projects/<int:project_id>/integrations/<int:integration_id>/operations/<int:operation_id>/',
+        CodexProjectIntegrationOperationDetailView.as_view(),
+        name='codex-project-integration-operation-update',
     ),
     path(
         'codex/projects/<int:project_id>/tasks/<int:task_id>/status/',

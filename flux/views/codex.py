@@ -28,6 +28,8 @@ from flux.codex_plans import (
     update_screen_in_private_project,
     update_document_in_private_project,
     update_integration_in_private_project,
+    create_integration_operation_in_private_project,
+    update_integration_operation_in_private_project,
     update_task_in_private_project,
     create_api_projection_in_private_project,
     update_api_projection_in_private_project,
@@ -301,6 +303,38 @@ class CodexProjectIntegrationUpdateView(APIView):
         except CodexPlanError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(integration)
+
+
+class CodexProjectIntegrationOperationCollectionView(APIView):
+    """Add one operation to an existing integration within a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, project_id, integration_id):
+        try:
+            operation = create_integration_operation_in_private_project(
+                request.user, project_id, integration_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(operation, status=status.HTTP_201_CREATED)
+
+
+class CodexProjectIntegrationOperationDetailView(APIView):
+    """Partially update one integration operation within a private Codex project."""
+
+    authentication_classes = [CodexTokenAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, project_id, integration_id, operation_id):
+        try:
+            operation = update_integration_operation_in_private_project(
+                request.user, project_id, integration_id, operation_id, request.data
+            )
+        except CodexPlanError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(operation)
 
 
 class CodexProjectMilestoneStatusView(APIView):

@@ -394,6 +394,14 @@ class PhenogramQuerySerializer(serializers.Serializer):
     refresh = serializers.BooleanField(required=False)
 
 
+class SpeciesExtendedQuerySerializer(serializers.Serializer):
+    """Query params for the species ``extended`` action (xeno-canto filters)."""
+
+    sound_type = serializers.CharField(required=False, allow_blank=False, max_length=64)
+    quality = serializers.ChoiceField(choices=["A", "B", "C", "D", "E"], required=False)
+    page = serializers.IntegerField(min_value=1, required=False, default=1)
+
+
 class SeasonalOverviewQuerySerializer(serializers.Serializer):
     """Filters for the species seasonal-overview endpoint."""
 

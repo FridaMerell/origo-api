@@ -311,29 +311,7 @@ def serialize_project(project):
                 'retries': item.retries,
                 'rate_limit_per_minute': item.rate_limit_per_minute,
                 'cache_ttl_seconds': item.cache_ttl_seconds,
-                'operations': [
-                    {
-                        'id': op.id,
-                        'name': op.name,
-                        'description': op.description,
-                        'method': op.method,
-                        'path': op.path,
-                        'body_format': op.body_format,
-                        'params': op.params,
-                        'items_path': op.items_path,
-                        'pagination': op.pagination,
-                        'pagination_config': op.pagination_config,
-                        'filters': op.filters,
-                        'entity_id': op.entity_id,
-                        'key_field': op.key_field,
-                        'mappings': op.mappings,
-                        'sync': op.sync,
-                        'sync_interval_minutes': op.sync_interval_minutes,
-                        'cache_ttl_seconds': op.cache_ttl_seconds,
-                        'sample_response': op.sample_response,
-                    }
-                    for op in item.operations.all()
-                ],
+                'operations': [_integration_operation_data(op) for op in item.operations.all()],
             }
             for item in project.integrations.prefetch_related('operations').order_by('id')
         ],
@@ -1747,3 +1725,122 @@ def update_integration_in_private_project(user, project_id, integration_id, payl
         'rate_limit_per_minute': integration.rate_limit_per_minute,
         'cache_ttl_seconds': integration.cache_ttl_seconds,
     }
+
+
+def _integration_operation_data(op):
+    return {
+        'id': op.id,
+        'name': op.name,
+        'description': op.description,
+        'method': op.method,
+        'path': op.path,
+        'body_format': op.body_format,
+        'params': op.params,
+        'items_path': op.items_path,
+        'pagination': op.pagination,
+        'pagination_config': op.pagination_config,
+        'filters': op.filters,
+        'entity_id': op.entity_id,
+        'key_field': op.key_field,
+        'mappings': op.mappings,
+        'sync': op.sync,
+        'sync_interval_minutes': op.sync_interval_minutes,
+        'cache_ttl_seconds': op.cache_ttl_seconds,
+        'sample_response': op.sample_response,
+    }
+
+
+# Fields clean_operation validates; an update merges the given ones onto the stored ones.
+INTEGRATION_OPERATION_FIELDS = (
+    'name', 'method', 'path', 'body_format', 'params', 'items_path', 'pagination',
+    'pagination_config', 'filters', 'mappings', 'key_field', 'sync',
+    'sync_interval_minutes', 'cache_ttl_seconds', 'sample_response',
+)
+
+
+def _private_integration(user, project_id, integration_id):
+    try:
+        project = _private_projects_for(user).get(pk=project_id)
+    except Project.DoesNotExist as exc:
+        raise CodexPlanError('Project not found or is not private to this Codex user.') from exc
+    try:
+        return project, Integration.objects.get(pk=integration_id, project=project)
+    except Integration.DoesNotExist as exc:
+        raise CodexPlanError('Integration not found in this project.') from exc
+
+
+def _operation_entity(project, payload, current=None):
+    """The entity an operation maps onto: payload ``entity_id`` (null clears it), else ``current``."""
+    if 'entity_id' not in payload:
+        return current
+    entity_id = payload['entity_id']
+    if entity_id is None:
+        return None
+    try:
+        return Entity.objects.get(pk=entity_id, project=project)
+    except (Entity.DoesNotExist, ValueError, TypeError) as exc:
+        raise CodexPlanError('entity_id is not an entity in this project.') from exc
+
+
+def _clean_integration_operation(integration, data, entity, exclude_pk=None):
+    try:
+        cleaned = integration_rules.clean_operation(
+            data, entity_mapping_info(entity) if entity is not None else None
+        )
+    except ValueError as exc:
+        raise CodexPlanError(f'{integration.name}.{data.get("name")}: {exc}') from exc
+    if integration.operations.filter(name=cleaned['name']).exclude(pk=exclude_pk).exists():
+        raise CodexPlanError(f'Operation name already exists on {integration.name}: {cleaned["name"]}.')
+    return cleaned
+
+
+@transaction.atomic
+def create_integration_operation_in_private_project(user, project_id, integration_id, payload):
+    """Add one operation to an existing integration in a private project.
+
+    Validated exactly as operations in an uploaded plan, except that the entity is
+    given by its persistent ``entity_id`` instead of a plan ref.
+    """
+    if not isinstance(payload, dict):
+        raise CodexPlanError('operation must be an object.')
+    project, integration = _private_integration(user, project_id, integration_id)
+    entity = _operation_entity(project, payload)
+    cleaned = _clean_integration_operation(integration, payload, entity)
+    operation = IntegrationOperation.objects.create(
+        integration=integration,
+        entity=entity,
+        description=_text(payload.get('description'), 'operation.description', maximum=10000),
+        **cleaned,
+    )
+    return _integration_operation_data(operation)
+
+
+@transaction.atomic
+def update_integration_operation_in_private_project(user, project_id, integration_id, operation_id, payload):
+    """Partially update one integration operation in place.
+
+    Only the given fields change. They are merged onto the stored operation and the
+    whole result is validated again, as on creation.
+    """
+    if not isinstance(payload, dict):
+        raise CodexPlanError('operation must be an object.')
+    project, integration = _private_integration(user, project_id, integration_id)
+    try:
+        operation = integration.operations.select_related('entity').get(pk=operation_id)
+    except IntegrationOperation.DoesNotExist as exc:
+        raise CodexPlanError('Operation not found on this integration.') from exc
+    known = set(INTEGRATION_OPERATION_FIELDS) | {'description', 'entity_id'}
+    if not known & set(payload):
+        raise CodexPlanError(f'At least one of {", ".join(sorted(known))} must be given.')
+
+    merged = {field: getattr(operation, field) for field in INTEGRATION_OPERATION_FIELDS}
+    merged.update({field: payload[field] for field in INTEGRATION_OPERATION_FIELDS if field in payload})
+    entity = _operation_entity(project, payload, operation.entity)
+    cleaned = _clean_integration_operation(integration, merged, entity, exclude_pk=operation.pk)
+    for field, value in cleaned.items():
+        setattr(operation, field, value)
+    operation.entity = entity
+    if 'description' in payload:
+        operation.description = _text(payload.get('description'), 'operation.description', maximum=10000)
+    operation.save()
+    return _integration_operation_data(operation)

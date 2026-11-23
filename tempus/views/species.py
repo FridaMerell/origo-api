@@ -34,6 +34,7 @@ from tempus.serializers import (
     SpeciesCategoryListSerializer,
     SpeciesCategorySerializer,
     SpeciesChecklistImportSerializer,
+    SpeciesExtendedQuerySerializer,
     SpeciesFollowSerializer,
     SpeciesResolveRequestSerializer,
     SpeciesResyncSerializer,
@@ -49,7 +50,30 @@ from tempus.models import (
     SpeciesFollow,
     species,
 )
-from tempus.services import artdatabanken, phenogram, season, species_lookup
+from tempus.services import artdatabanken, phenogram, season, species_lookup, xeno_canto
+
+
+def species_extended(
+    taxon_id: int,
+    scientific_name: str,
+    *,
+    sound_type: str | None = None,
+    quality: str | None = None,
+    page: int = 1,
+) -> dict:
+    """Payload of the species ``extended`` action; one source failing leaves the other."""
+    result = {"artfakta": None, "artfakta_error": None, "sounds": None, "sounds_error": None}
+    try:
+        result["artfakta"] = artdatabanken.get_species_data(taxon_id)
+    except (artdatabanken.ArtdatabankenConfigurationError, artdatabanken.ArtdatabankenAPIError) as exc:
+        result["artfakta_error"] = str(exc)
+    try:
+        result["sounds"] = xeno_canto.recordings_for_species(
+            scientific_name, sound_type=sound_type, quality=quality, page=page
+        )
+    except (xeno_canto.XenoCantoConfigurationError, xeno_canto.XenoCantoAPIError, ValueError) as exc:
+        result["sounds_error"] = str(exc)
+    return result
 
 
 def _day_of_year_in_span(start_field, end_field, day):
@@ -715,6 +739,28 @@ class SpeciesViewSet(SharedDataViewSet):
                 "phenogram": PhenogramSerializer(row).data if row is not None else None,
             },
             status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def extended(self, request, dyntaxa_taxon_id=None):
+        """Artfakta species data and xeno-canto recordings, read live.
+
+        Query: ``sound_type`` (xeno-canto type, e.g. ``song``), ``quality``
+        (A-E) and ``page`` filter the recordings. Each source is fetched on its
+        own: if one fails, the other is still returned and ``artfakta_error`` /
+        ``sounds_error`` carries the reason.
+        """
+        species = self.get_object()
+        params = SpeciesExtendedQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        return Response(
+            species_extended(
+                species.dyntaxa_taxon_id, species.scientific_name, **params.validated_data
+            )
         )
 
     @action(detail=False, methods=["post"], url_path="generate-phenograms")

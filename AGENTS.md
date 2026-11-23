@@ -77,6 +77,20 @@ Read `api_operations`, `api_operation_responses`, and `api_projections` from
 `GET {base}/projects/{id}/`. Use persistent IDs and verify each write against
 its response. RolePermission references an ApiOperation and keeps its scope.
 
+### Integrations
+
+Update an existing integration in place instead of appending a second one:
+
+- `PATCH {base}/projects/{project_id}/integrations/{integration_id}/` changes
+  the integration's own settings; its operations are left as they are.
+- `POST {base}/projects/{project_id}/integrations/{integration_id}/operations/`
+  adds one operation, validated as operations in an uploaded plan; an entity
+  is given by its persistent `entity_id`.
+- `PATCH {base}/projects/{project_id}/integrations/{integration_id}/operations/{operation_id}/`
+  changes only the given fields; the merged operation is validated again.
+
+Both operation writes return the persisted operation; verify against that.
+
 ### Providers
 
 `Provider` defines a generated frontend data boundary by selecting one or more

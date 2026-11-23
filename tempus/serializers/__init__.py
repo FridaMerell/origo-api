@@ -24,6 +24,7 @@ from .routes import (
 from .species import (
     GeneratePhenogramsSerializer,
     PhenogramQuerySerializer,
+    SpeciesExtendedQuerySerializer,
     PhenogramSerializer,
     RegisterSpeciesBatchSerializer,
     RegisterSpeciesSerializer,
@@ -54,6 +55,7 @@ __all__ = [
     "GeoAreaSerializer",
     "ObservationSerializer",
     "PhenogramQuerySerializer",
+    "SpeciesExtendedQuerySerializer",
     "PhenogramSerializer",
     "PhenophaseSerializer",
     "PublicObservationSerializer",
