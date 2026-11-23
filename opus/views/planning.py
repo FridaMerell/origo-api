@@ -1,4 +1,7 @@
+from urllib.parse import quote
+
 from django.db import transaction
+from django.http import HttpResponse
 from django.db.models import F, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, viewsets
@@ -201,6 +204,30 @@ class EditionViewSet(viewsets.ModelViewSet):
         except DocumentImportError as exc:
             raise ValidationError({"chapter_ids": str(exc)})
         return Response({"chapters": self._chapters(edition)})
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export(self, request, pk=None):
+        """The edition's text as a plain-text download: title, then each chapter's label and paragraphs."""
+        edition = self.get_object()
+        units = TextUnit.objects.filter(version=edition).order_by("position", "id").values_list(
+            "kind", "parent_id", "id", "label", "content"
+        )
+        chapters = []
+        paragraphs_by_parent = {}
+        for kind, parent_id, unit_id, label, content in units:
+            if kind == TextUnit.Kind.CHAPTER and parent_id is None:
+                chapters.append((unit_id, label, content))
+            elif kind != TextUnit.Kind.CHAPTER:
+                paragraphs_by_parent.setdefault(parent_id, []).append(content)
+        blocks = [edition.title]
+        # Paragraphs outside any chapter (older imports) come first, as in the reader.
+        blocks += paragraphs_by_parent.get(None, [])
+        for unit_id, label, content in chapters:
+            blocks.append(label or content)
+            blocks += paragraphs_by_parent.get(unit_id, [])
+        response = HttpResponse("\n\n".join(block for block in blocks if block) + "\n", content_type="text/plain; charset=utf-8")
+        response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(edition.title)}.txt"
+        return response
 
     @staticmethod
     def _chapter(edition, chapter_id):
