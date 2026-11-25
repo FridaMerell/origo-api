@@ -24,7 +24,7 @@ import os
 import re
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Iterator, NotRequired, TypedDict
 
@@ -246,7 +246,11 @@ def _call(
     params: dict | None = None,
     json: Any = None,
     timeout: float | None = None,
+    queued: bool = True,
 ) -> Any:
+    """One API call. ``queued=False`` leaves it out of the shared request queue (and its cooldown), for a call
+    someone is waiting for in the browser, which must not stand behind phenogram generation; a 429 is still
+    waited out and retried."""
     base_url, key = _require(base_url_key, subscription_key)
     url = f"{base_url}/{path.lstrip('/')}"
     request_timeout = float(
@@ -255,7 +259,7 @@ def _call(
     import requests
 
     for attempt in range(RATE_LIMIT_RETRIES + 1):
-        with _global_request_slot():
+        with _global_request_slot() if queued else nullcontext():
             started = time.monotonic()
             try:
                 response = _session().request(
@@ -578,8 +582,10 @@ def _snake(value: Any) -> Any:
     return value
 
 
-def get_species_data(taxon_id: int) -> dict[str, Any] | None:
+def get_species_data(taxon_id: int, *, queued: bool = True) -> dict[str, Any] | None:
     """All Artfakta species data for a Dyntaxa taxon ID, or None when Artfakta has none.
+
+    ``queued=False`` skips the shared request queue (see ``_call``), for a page waiting on the answer.
 
     ``GET {SPECIES_INFORMATION_URL}/speciesdataservice/v1/speciesdata?taxa=<id>``
     returns ``[{"speciesData": {...}, "taxonId", "parentId", "swedishName",
@@ -602,6 +608,7 @@ def get_species_data(taxon_id: int) -> dict[str, Any] | None:
         "GET", "SPECIES_INFORMATION_URL", "SUBSCRIPTION_KEY_SPECIES_INFORMATION",
         "/speciesdataservice/v1/speciesdata",
         params={"taxa": taxon_id},
+        queued=queued,
     )
     row = next(
         (r for r in rows or [] if isinstance(r, dict) and r.get("taxonId") == taxon_id),

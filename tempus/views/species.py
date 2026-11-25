@@ -1,7 +1,9 @@
 """Species, phenogram, and follow views."""
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
+from django.db import connections
 from django.db.models import (
     Case,
     Exists,
@@ -60,19 +62,52 @@ def species_extended(
     sound_type: str | None = None,
     quality: str | None = None,
     page: int = 1,
+    artfakta: bool = True,
+    sounds: bool = True,
 ) -> dict:
-    """Payload of the species ``extended`` action; one source failing leaves the other."""
+    """Payload of the species ``extended`` action; one source failing leaves the other.
+
+    With ``artfakta=False`` Artfakta is not fetched and both its keys stay ``None``;
+    with ``sounds=False`` the recordings are left out the same way.
+    """
     result = {"artfakta": None, "artfakta_error": None, "sounds": None, "sounds_error": None}
-    try:
-        result["artfakta"] = artdatabanken.get_species_data(taxon_id)
-    except (artdatabanken.ArtdatabankenConfigurationError, artdatabanken.ArtdatabankenAPIError) as exc:
-        result["artfakta_error"] = str(exc)
-    try:
-        result["sounds"] = xeno_canto.recordings_for_species(
-            scientific_name, sound_type=sound_type, quality=quality, page=page
-        )
-    except (xeno_canto.XenoCantoConfigurationError, xeno_canto.XenoCantoAPIError, ValueError) as exc:
-        result["sounds_error"] = str(exc)
+
+    def fetch_artfakta():
+        try:
+            # Someone is waiting for this in the browser: it does not stand in the queue behind phenogram generation.
+            return artdatabanken.get_species_data(taxon_id, queued=False), None
+        except (artdatabanken.ArtdatabankenConfigurationError, artdatabanken.ArtdatabankenAPIError) as exc:
+            return None, str(exc)
+
+    def fetch_sounds():
+        try:
+            return (
+                xeno_canto.recordings_for_species(
+                    scientific_name, sound_type=sound_type, quality=quality, page=page
+                ),
+                None,
+            )
+        except (xeno_canto.XenoCantoConfigurationError, xeno_canto.XenoCantoAPIError, ValueError) as exc:
+            return None, str(exc)
+
+    def in_thread(fetch):
+        # The cache lives in the database, and a thread has a database connection of its own to close.
+        try:
+            return fetch()
+        finally:
+            connections.close_all()
+
+    if artfakta and sounds:
+        # The two sources are independent, so they are fetched at the same time, not one after the other.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            artfakta_future = pool.submit(in_thread, fetch_artfakta)
+            sounds_future = pool.submit(in_thread, fetch_sounds)
+            result["artfakta"], result["artfakta_error"] = artfakta_future.result()
+            result["sounds"], result["sounds_error"] = sounds_future.result()
+    elif artfakta:
+        result["artfakta"], result["artfakta_error"] = fetch_artfakta()
+    elif sounds:
+        result["sounds"], result["sounds_error"] = fetch_sounds()
     return result
 
 
@@ -752,7 +787,9 @@ class SpeciesViewSet(SharedDataViewSet):
         Query: ``sound_type`` (xeno-canto type, e.g. ``song``), ``quality``
         (A-E) and ``page`` filter the recordings. Each source is fetched on its
         own: if one fails, the other is still returned and ``artfakta_error`` /
-        ``sounds_error`` carries the reason.
+        ``sounds_error`` carries the reason. ``artfakta=false`` skips Artfakta
+        (``artfakta`` and ``artfakta_error`` are then ``null``); ``sounds=false``
+        skips the recordings the same way.
         """
         species = self.get_object()
         params = SpeciesExtendedQuerySerializer(data=request.query_params)

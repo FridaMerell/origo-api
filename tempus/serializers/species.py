@@ -400,6 +400,10 @@ class SpeciesExtendedQuerySerializer(serializers.Serializer):
     sound_type = serializers.CharField(required=False, allow_blank=False, max_length=64)
     quality = serializers.ChoiceField(choices=["A", "B", "C", "D", "E"], required=False)
     page = serializers.IntegerField(min_value=1, required=False, default=1)
+    # ``false`` leaves Artfakta out, for a view that only needs the recordings.
+    artfakta = serializers.BooleanField(required=False, default=True)
+    # ``false`` leaves the recordings out, so Artfakta can be fetched on its own.
+    sounds = serializers.BooleanField(required=False, default=True)
 
 
 class SeasonalOverviewQuerySerializer(serializers.Serializer):
